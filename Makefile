@@ -24,5 +24,6 @@ uninstall:
 	make -C $(SUPPORT_LIB_PATH) uninstall
 
 clean:
-	rm src/ast.mc
+	rm -f src/ast.mc
 	rm -rf build
+	rm -rf rtppl-support/_build
