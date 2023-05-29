@@ -1,0 +1,10 @@
+(library
+ (name rtppl)
+ (public_name rtppl-support)
+ (foreign_stubs
+  (language c)
+  (names rt-stubs))
+ (foreign_stubs
+  (language cxx)
+  (names fifo-stubs infer-stubs)
+  (flags -std=c++14 -fPIC)))

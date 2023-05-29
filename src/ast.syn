@@ -1,0 +1,192 @@
+language Rtppl
+
+include "lexer.mc"
+
+start RtpplProgram
+
+type RtpplProgram
+type RtpplTop
+type RtpplTopParams
+type RtpplStmt
+type RtpplLoopStmt
+type RtpplStmtNoIdent
+type RtpplExpr {grouping = "(" ")", }
+type RtpplExprNoIdent
+type RtpplType {grouping = "(" ")", }
+type RtpplTypeNoIdent
+type RtpplConst
+type RtpplInferEnd
+
+type RtpplPort
+
+type RtpplMain
+type RtpplExt
+type RtpplTask
+type RtpplConnection
+type RtpplPortSpec
+
+token LIdent {
+  repr = LIdentRepr {},
+  constructor = LIdentTok,
+  fragment = LIdentTokenParser,
+  ty = String,
+}
+token UIdent {
+  repr = UIdentRepr {},
+  constructor = UIdentTok,
+  fragment = UIdentTokenParser,
+  ty = String,
+}
+token Integer {
+  repr = IntRepr {},
+  constructor = IntTok,
+  fragment = TimedIntegerTokenParser,
+  ty = Int,
+}
+token Float {
+  repr = FloatRepr {},
+  constructor = FloatTok,
+  fragment = UFloatTokenParser,
+  ty = Float,
+}
+token Boolean {
+  repr = BoolRepr {},
+  constructor = BoolTok,
+  fragment = BooleanTokenParser,
+  ty = Bool,
+}
+token StringLit {
+  repr = StringRepr {},
+  constructor = StringTok,
+  fragment = StringTokenParser,
+  ty = String,
+}
+
+token LName {
+  base = LIdent,
+  wrap = nameNoSym,
+  ty = Name,
+}
+token UName {
+  base = UIdent,
+  wrap = nameNoSym,
+  ty = Name,
+}
+
+token {fragment = OperatorTokenParser,}
+token {fragment = CommaTokenParser,}
+token {fragment = BracketTokenParser,}
+token {fragment = WhitespaceParser,}
+token {fragment = RTPPLLineCommentParser,}
+
+prod Program : RtpplProgram = tops:RtpplTop* main:RtpplMain
+
+prod Constant : RtpplTop = "const" id:LName ":" ty:RtpplType "=" e:RtpplExpr
+prod TypeAlias : RtpplTop = "type" id:UName "=" ty:RtpplType
+prod FunctionDef : RtpplTop =
+  "def" id:LName "(" params:RtpplTopParams ")" ":" ty:RtpplType
+  "{" body:{stmts:RtpplStmt* ("return" ret:RtpplExpr)?} "}"
+prod ModelDef : RtpplTop =
+  "model" id:LName "(" params:RtpplTopParams ")" ":" ty:RtpplType
+  "{" body:{stmts:RtpplStmt* ("return" ret:RtpplExpr)?} "}"
+prod TemplateDef : RtpplTop =
+  "template" id:LName "(" params:RtpplTopParams ")"
+  "{" body:{ports:RtpplPort* stmts:RtpplStmt*} "}"
+
+prod Params : RtpplTopParams =
+  (params:{id:LName ":" ty:RtpplType} ("," params:{id:LName ":" ty:RtpplType})*)?
+
+prod Input : RtpplPort = "input" id:LIdent ":" ty:RtpplType
+prod Output : RtpplPort = "output" id:LIdent ":" ty:RtpplType
+
+prod Binding : RtpplStmt = "var" id:LName (":" ty:RtpplType)? "=" e:RtpplExpr
+prod Observe : RtpplStmt = "observe" e:RtpplExpr "~" d:RtpplExpr
+prod Assume : RtpplStmt = "sample" id:LName "~" d:RtpplExpr
+prod Infer : RtpplStmt = "infer" model:RtpplExpr extra:RtpplInferEnd "to" id:LName
+prod Degenerate : RtpplStmt = "degenerate"
+prod Resample : RtpplStmt = "resample"
+prod Read : RtpplStmt = "read" port:LIdent "to" (dst:LName ("." proj:LIdent)?)
+prod Write : RtpplStmt = "write" src:RtpplExpr "to" port:LIdent ("offset" delay:RtpplExpr)?
+prod Sdelay : RtpplStmt = "sdelay" e:RtpplExpr
+prod Condition : RtpplStmt =
+  "cond" id:LName? "if" cond:RtpplExpr "{" thn:RtpplStmt* "}" "else" "{" els:RtpplStmt* "}"
+prod LoopPlusStmt : RtpplStmt = "loop" id:LName? loop:RtpplLoopStmt
+
+prod InferBudget : RtpplInferEnd = "budget" t:RtpplExpr
+prod InferFixed : RtpplInferEnd = "particles" p:RtpplExpr
+
+-- NOTE(larshum, 2023-03-06): Grammar workarounds to make it LL(1).
+prod ForIn : RtpplLoopStmt = "for" id:LName "in" e:RtpplExpr "{" body:RtpplStmt* "}"
+prod InfLoop : RtpplLoopStmt = "{" body:RtpplStmt* "}"
+prod WhileCond : RtpplLoopStmt = "while" cond:RtpplExpr "{" body:RtpplStmt* "}"
+
+prod IdentPlusStmt : RtpplStmt = id:LName next:RtpplStmtNoIdent
+prod Reassign : RtpplStmtNoIdent = ("." proj:LIdent)? "=" e:RtpplExpr
+prod FunctionCallS : RtpplStmtNoIdent = "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")"
+prod IdentPlusExpr : RtpplExpr = id:LName next:RtpplExprNoIdent
+prod Variable : RtpplExprNoIdent = empty
+prod FunctionCallE : RtpplExprNoIdent = "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")"
+prod Projection : RtpplExprNoIdent = "." id:LIdent
+
+prod ArrayAccess : RtpplExpr = e:RtpplExpr "[" idx:RtpplExpr "]"
+prod ArrayLit : RtpplExpr = "[" (elems:RtpplExpr ("," elems:RtpplExpr)*)? "]"
+prod RecordLit : RtpplExpr = "{" (fields:{id:LIdent "=" e:RtpplExpr} ("," fields:{id:LIdent "=" e:RtpplExpr})*)? "}"
+prod Literal : RtpplExpr = const:RtpplConst
+prod Length : RtpplExpr = "|" e:RtpplExpr "|"
+prod DistSamples : RtpplExpr = "samples" e:RtpplExpr
+
+-- NOTE(larshum, 2023-04-05): Definition of elementary distributions
+prod GaussianDist : RtpplExpr = "Gaussian" "(" mu:RtpplExpr "," sigma:RtpplExpr ")"
+prod UniformDist : RtpplExpr = "Uniform" "(" lo:RtpplExpr "," hi:RtpplExpr ")"
+prod BernoulliDist : RtpplExpr = "Bernoulli" "(" p:RtpplExpr ")"
+prod GammaDist : RtpplExpr = "Gamma" "(" k:RtpplExpr "," theta:RtpplExpr ")"
+
+infix left Add : RtpplExpr = "+"
+infix left Sub : RtpplExpr = "-"
+infix left Mul : RtpplExpr = "*"
+infix left Div : RtpplExpr = "/"
+infix Eq : RtpplExpr = "=="
+infix Neq : RtpplExpr = "!="
+infix Lt : RtpplExpr = "<"
+infix Gt : RtpplExpr = ">"
+infix Leq : RtpplExpr = "<="
+infix Geq : RtpplExpr = ">="
+infix left And : RtpplExpr = "&&"
+infix left Or : RtpplExpr = "||"
+
+precedence {
+  Mul Div;
+  Add Sub;
+  Eq Neq Lt Gt Geq Leq;
+  And Or;
+}
+
+prod Main : RtpplMain =
+  "system" "{" ext:RtpplExt* tasks:RtpplTask* connections:RtpplConnection* "}"
+
+prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType
+prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType
+
+prod Task : RtpplTask = "task" id:LName "=" templateId:LName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")"
+prod Connection : RtpplConnection = from:RtpplPortSpec "->" to:RtpplPortSpec
+prod PortSpec : RtpplPortSpec = port:LName ("." id:LIdent)?
+
+prod Int : RtpplType = "Int"
+prod Float : RtpplType = "Float"
+prod Bool : RtpplType = "Bool"
+prod Unit : RtpplType = "Unit"
+prod Seq : RtpplType = "[" ty:RtpplType "]"
+prod Record : RtpplType =
+  "{" (fields:{id:LIdent ":" ty:RtpplType} ("," fields:{id:LIdent ":" ty:RtpplType})*)? "}"
+prod right Function : RtpplType = from:RtpplType "->" to:RtpplType
+prod Dist : RtpplType = "Dist" "(" ty:RtpplType ")"
+
+-- NOTE(larshum, 2023-03-06): Yet another workaround to make grammar LL(1).
+prod Alias : RtpplType = id:UName next:RtpplTypeNoIdent
+prod Direct : RtpplTypeNoIdent = empty
+prod Application : RtpplTypeNoIdent = "(" args:RtpplType ("," args:RtpplType)* ")"
+
+prod LitInt : RtpplConst = value:Integer
+prod LitFloat : RtpplConst = value:Float
+prod LitBool : RtpplConst = value:Boolean
+prod LitString : RtpplConst = value:StringLit
