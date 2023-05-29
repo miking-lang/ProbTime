@@ -86,10 +86,10 @@ lang RtpplCompileBase =
     else
       let strs = [
         "sdelay", "openFileDescriptor", "closeFileDescriptor",
-        "rtpplReadFloatPort", "rtpplReadDistFloatPort",
-        "rtpplReadDistFloatRecordPort", "rtpplWriteFloatPort",
-        "rtpplWriteDistFloatPort", "rtpplWriteDistFloatRecordPort", "tsv",
-        "rtpplBatchedInferRunner", "rtpplFixedInferRunner", "rtpplRuntimeInit"
+        "rtpplReadFloat", "rtpplReadDistFloat", "rtpplReadDistFloatRecord",
+        "rtpplWriteFloats", "rtpplWriteDistFloats",
+        "rtpplWriteDistFloatRecords", "tsv", "rtpplBatchedInferRunner",
+        "rtpplFixedInferRunner", "rtpplRuntimeInit"
       ] in
       let rt = readRuntime () in
       match optionMapM identity (findNamesOfStrings strs rt)

@@ -15,20 +15,20 @@ external clock_nanosleep : timespec -> unit = "clock_nanosleep_stub"
 external set_priority : int -> int = "set_priority_stub"
 let set_max_priority (_ : unit) : int = set_priority 255
 
-external open_file_nonblocking : string -> int = "open_file_nonblocking_stub"
+external open_file_descriptor : string -> int = "open_file_nonblocking_stub"
 external close_file_descriptor : int -> unit = "close_file_descriptor_stub"
 
-external read_float_named_pipe : int -> (float tsv) array = "read_float_named_pipe_stub"
-external write_float_named_pipe : int -> float tsv -> unit = "write_float_named_pipe_stub"
-external read_dist_float_named_pipe
+external read_float : int -> (float tsv) array = "read_float_named_pipe_stub"
+external write_float : int -> float tsv -> unit = "write_float_named_pipe_stub"
+external read_dist_float
   : int -> ((float * float) array tsv) array = "read_dist_float_named_pipe_stub"
-external write_dist_float_named_pipe
+external write_dist_float
   : int -> (float array * float array) tsv -> unit
   = "write_dist_float_named_pipe_stub"
-external read_dist_float_record_named_pipe
+external read_dist_float_record
   : int -> int -> ((float * opaque) array tsv) array
   = "read_dist_float_record_named_pipe_stub"
-external write_dist_float_record_named_pipe
+external write_dist_float_record
   : int -> int -> (opaque array * float array) tsv -> unit
   = "write_dist_float_record_named_pipe_stub"
 

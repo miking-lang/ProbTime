@@ -69,7 +69,7 @@ let lastSdelay : Ref Timespec = ref (0,0)
 -- reference containing the start time of the current timing point. The result
 -- is an integer denoting the number of milliseconds of overrun.
 let delayBy : Int -> Int = lam delay.
-  let oldPriority = setMaxPriority () in
+  let oldPriority = rtpplSetMaxPriority () in
   let intervalTime = nanosToTimespec delay in
   let endTime = getMonotonicTime () in
   let elapsedTime = diffTimespec endTime (deref monoLogicalTime) in
@@ -84,7 +84,7 @@ let delayBy : Int -> Int = lam delay.
   in
   modref monoLogicalTime waitTime;
   modref wallLogicalTime (addTimespec (deref wallLogicalTime) intervalTime);
-  setPriority oldPriority;
+  rtpplSetPriority oldPriority;
   let t1 = getProcessCpuTime () in
   printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay)))]);
   modref lastSdelay t1;
@@ -124,7 +124,7 @@ let rtpplBatchedInferRunner =
     create n (lam i. (get w i, get s i))
   in
   let samples =
-    externalBatchedInference (unsafeCoerce model) deadlineTs
+    rtpplBatchedInference (unsafeCoerce model) deadlineTs
   in
   let result = samplesToDist (join (unsafeCoerce samples)) in
   (if printTime then
@@ -145,34 +145,34 @@ let rtpplFixedInferRunner =
 
 
 let openFileDescriptor : String -> Int = lam file.
-  externalOpenFileNonblocking file
+  rtpplOpenFileDescriptor file
 
 let closeFileDescriptor : Int -> () = lam fd.
-  externalCloseFileDescriptor fd
+  rtpplCloseFileDescriptor fd
 
-let rtpplReadFloatPort = lam fd.
-  externalReadFloatPipe fd
+let rtpplReadFloat = lam fd.
+  rtpplReadFloat fd
 
-let rtpplReadDistFloatPort = lam fd.
-  externalReadDistFloatPipe fd
+let rtpplReadDistFloat = lam fd.
+  rtpplReadDistFloat fd
 
-let rtpplReadDistFloatRecordPort = lam fd. lam nfields.
-  externalReadDistFloatRecordPipe fd nfields
+let rtpplReadDistFloatRecord = lam fd. lam nfields.
+  rtpplReadDistFloatRecord fd nfields
 
-let rtpplWriteFloatPort =
+let rtpplWriteFloats =
   lam fd. lam msgs.
   -- TODO(larshum, 2023-04-11): This function will open and close a FIFO queue
   -- every time it is called, which may be very expensive. Therefore, we should
   -- open them at startup and then store them until shutdown.
-  iter (lam msg. externalWriteFloatPipe fd msg) msgs
+  iter (lam msg. rtpplWriteFloat fd msg) msgs
 
-let rtpplWriteDistFloatPort =
+let rtpplWriteDistFloats =
   lam fd. lam msgs.
-  iter (lam msg. externalWriteDistFloatPipe fd msg) msgs
+  iter (lam msg. rtpplWriteDistFloat fd msg) msgs
 
-let rtpplWriteDistFloatRecordPort =
+let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
-  iter (lam msg. externalWriteDistFloatRecordPipe fd nfields msg) msgs
+  iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
 let rtpplRuntimeInit : (() -> ()) -> (() -> ()) -> (() -> Unknown) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam cont.
