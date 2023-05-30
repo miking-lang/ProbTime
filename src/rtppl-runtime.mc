@@ -92,11 +92,11 @@ let delayBy : Int -> Int = lam delay.
 
 type TSV a = (Timespec, a)
 
-let timestamp : TSV Unknown -> Int = lam tsv.
+let timestamp : all a. TSV a -> Int = lam tsv.
   let lt = deref wallLogicalTime in
   timespecToNanos (diffTimespec tsv.0 lt)
-let value : TSV Unknown -> Unknown = lam tsv. tsv.1
-let tsv : Int -> Unknown -> TSV Unknown = lam offset. lam value.
+let value : all a. TSV a -> a = lam tsv. tsv.1
+let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
   let lt = deref wallLogicalTime in
   (addTimespec lt (nanosToTimespec offset), value)
 
@@ -143,7 +143,6 @@ let rtpplFixedInferRunner =
   else ());
   result
 
-
 let openFileDescriptor : String -> Int = lam file.
   rtpplOpenFileDescriptor file
 
@@ -174,7 +173,7 @@ let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
-let rtpplRuntimeInit : (() -> ()) -> (() -> ()) -> (() -> Unknown) -> () =
+let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam cont.
 
   -- Sets up a signal handler on SIGINT which calls code for closing all file
@@ -207,17 +206,17 @@ let eqInt = eqi
 let floorToInt = floorfi
 let intToFloat = int2float
 
-let push : [Unknown] -> Unknown -> [Unknown] = lam s. lam elem.
+let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem
 
-let concat : [Unknown] -> [Unknown] -> [Unknown] = lam l. lam r.
+let concat : all a. [a] -> [a] -> [a] = lam l. lam r.
   concat l r
 
-let sort : (Unknown -> Unknown -> Int) -> [Unknown] -> [Unknown] =
+let sort : all a. (a -> a -> Int) -> [a] -> [a] =
   lam cmp. lam s.
   quickSort cmp s
 
-let filter : (Unknown -> Bool) -> [Unknown] -> [Unknown] =
+let filter : all a. (a -> Bool) -> [a] -> [a] =
   lam p. lam s.
   foldl (lam acc. lam x. if p x then snoc acc x else acc) [] s
 
@@ -226,7 +225,7 @@ recursive let range : Int -> Int -> [Int] = lam lo. lam hi.
   else []
 end
 
-let randElemExn : [Unknown] -> Unknown = lam s.
+let randElemExn : all a. [a] -> a = lam s.
   if null s then error "Cannot get random element of empty sequence"
   else
     let idx = randIntU 0 (length s) in

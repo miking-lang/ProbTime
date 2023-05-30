@@ -1274,9 +1274,9 @@ lang RtpplCompile =
   | (TaskRtpplTask {id = {v = id}, templateId = {v = tid}, args = args,
                     info = info}) & task ->
     let runtimeIds = getRuntimeIds () in
-    -- TODO(larshum, 2023-04-11): This only works assuming the (escaped) name
+    -- NOTE(larshum, 2023-05-30): This only works assuming the (escaped) name
     -- of the function used as a template is distinct from names used in the
-    -- runtime.
+    -- runtime. We escape the template name to ensure this is the case.
     let templateName = _rtpplEscapeName tid in
     match findName (nameGetStr templateName) env.ast with Some templateId then
       match mapLookup tid env.ports with Some ports then
