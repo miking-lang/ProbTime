@@ -340,7 +340,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
     let body = compileRtpplExpr e in
     ( env
     , TmLet {
-        ident = id, tyAnnot = _tyuk info, tyBody = ty, body = body,
+        ident = id, tyAnnot = ty, tyBody = _tyuk info, body = body,
         inexpr = uunit_, ty = _tyuk info, info = info } )
   | TypeAliasRtpplTop {id = {v = id}, ty = ty, info = info} ->
     ( {env with aliases = mapInsert id ty env.aliases}
@@ -356,7 +356,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
     let body = compileRtpplStmts env retExpr stmts in
     ( env
     , TmLet {
-        ident = id, tyAnnot = tyAnnot, tyBody = tyAnnot,
+        ident = id, tyAnnot = tyAnnot, tyBody = _tyuk info,
         body = foldl addParamToBody body params, inexpr = uunit_,
         ty = _tyuk info, info = info } )
   | ModelDefRtpplTop {
@@ -368,7 +368,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
     let body = compileRtpplStmts env retExpr stmts in
     ( env
     , TmLet {
-        ident = id, tyAnnot = tyAnnot, tyBody = tyAnnot,
+        ident = id, tyAnnot = tyAnnot, tyBody = _tyuk info,
         body = foldl addParamToBody body params, inexpr = uunit_,
         ty = _tyuk info, info = info } )
   | TemplateDefRtpplTop {
@@ -388,7 +388,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
     let body = bindall_ (map (compileRtpplStmt env) stmts) in
     ( env
     , TmLet {
-        ident = escapedId, tyAnnot = tyAnnot, tyBody = tyAnnot,
+        ident = escapedId, tyAnnot = tyAnnot, tyBody = _tyuk info,
         body = foldl addParamToBody body params, inexpr = uunit_,
         ty = _tyuk info, info = info } )
 
