@@ -85,9 +85,6 @@ let delayBy : Int -> Int = lam delay.
   modref monoLogicalTime waitTime;
   modref wallLogicalTime (addTimespec (deref wallLogicalTime) intervalTime);
   rtpplSetPriority oldPriority;
-  let t1 = getProcessCpuTime () in
-  printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay)))]);
-  modref lastSdelay t1;
   overrun
 
 type TSV a = (Timespec, a)
@@ -103,11 +100,16 @@ let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
 -- NOTE(larshum, 2023-04-25): Before the delay, we flush the messages stored in
 -- the output buffers. After the delay, we update the contents of the input
 -- sequences by reading.
-let sdelay : (() -> ()) -> (() -> ()) -> Int -> Int =
-  lam flushOutputs. lam updateInputs. lam delay.
+let sdelay : (() -> ()) -> (() -> ()) -> Int -> Bool -> Int =
+  lam flushOutputs. lam updateInputs. lam delay. lam printTime.
   flushOutputs ();
   let overrun = delayBy delay in
   updateInputs ();
+  (if printTime then
+    let t1 = getProcessCpuTime () in
+    printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay)))]);
+    modref lastSdelay t1
+  else ());
   overrun
 
 let rtpplBatchedInferRunner =
@@ -205,6 +207,15 @@ let geqInt = geqi
 let eqInt = eqi
 let floorToInt = floorfi
 let intToFloat = int2float
+
+let print : String -> () = lam s.
+  print s
+
+let printLine : String -> () = lam s.
+  printLn s
+
+let floatToString : Float -> String = lam f.
+  float2string f
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem

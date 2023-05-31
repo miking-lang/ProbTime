@@ -3,14 +3,12 @@ SUPPORT_LIB_PATH=rtppl-support
 BIN_PATH=$(HOME)/.local/bin
 SRC_PATH=$(HOME)/.local/src/rtppl
 
-build/$(RTPPL_NAME): build src/ast.mc $(shell find src -name "*.mc")
+build/$(RTPPL_NAME): src/ast.mc $(shell find src -name "*.mc")
+	mkdir -p build
 	mi compile src/$(RTPPL_NAME).mc --output build/$(RTPPL_NAME)
 
 src/%.mc: src/%.syn
 	mi syn $< $@
-
-build:
-	mkdir -p build
 
 install: build/$(RTPPL_NAME)
 	cp $< $(BIN_PATH)/$(RTPPL_NAME)

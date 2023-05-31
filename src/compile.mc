@@ -63,7 +63,8 @@ lang RtpplCompileBase =
     llSolutions : Map Name (Map Name Type),
     ports : Map Name [PortData],
     topVarEnv : Map String Name,
-    aliases : Map Name RtpplType
+    aliases : Map Name RtpplType,
+    options : RtpplOptions
   }
 
   sem readRuntime : () -> Expr
@@ -1257,13 +1258,19 @@ lang RtpplCompile =
     let sdelayId = rtIds.sdelay in
     let liftedArgs = getCapturedTopLevelVars env sdelayId in
     let sdelayFun = appSeq_ (_var info sdelayId) liftedArgs in
+    let printTime = TmConst {
+      val = CBool {val = env.options.printSdelayTime},
+      ty = _tyuk info, info = info
+    } in
     TmApp {
       lhs = TmApp {
         lhs = TmApp {
-          lhs = sdelayFun, rhs = _var info flushOutputsId,
-          ty = _tyuk info, info = info},
-        rhs = _var info updateInputsId, ty = _tyuk info, info = info},
-      rhs = e, ty = _tyuk info, info = info}
+          lhs = TmApp {
+            lhs = sdelayFun, rhs = _var info flushOutputsId,
+            ty = _tyuk info, info = info},
+          rhs = _var info updateInputsId, ty = _tyuk info, info = info},
+        rhs = e, ty = _tyuk info, info = info},
+      rhs = printTime, ty = _tyuk info, info = info}
   | t -> smap_Expr_Expr (specializeRtpplExprs env taskId) t
 
   -- NOTE(larshum, 2023-04-11): The AST of each task is produced by performing
@@ -1346,7 +1353,8 @@ lang RtpplCompile =
       llSolutions = llSolutions,
       ports = foldl collectPortsPerTop (mapEmpty nameCmp) p.tops,
       topVarEnv = (addTopNames symEnvEmpty coreExpr).varEnv,
-      aliases = topEnv.aliases
+      aliases = topEnv.aliases,
+      options = options
     } in
     compileMain env p.main
 end
