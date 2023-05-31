@@ -126,7 +126,7 @@ lang Rtppl =
     -- NOTE(larshum, 2023-04-18): If enabled, writes the MExpr AST of the task
     -- to a file using the filepath with a '.mc' suffix.
     (if options.debugCompileMExpr then
-      writeFile (concat filepath ".mc") (expr2str ast)
+      writeFile (concat filepath ".mc") (concat "mexpr\n" (expr2str ast))
     else ());
     let ast = typeCheck ast in
     let ast = lowerAll ast in
