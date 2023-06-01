@@ -208,14 +208,10 @@ let eqInt = eqi
 let floorToInt = floorfi
 let intToFloat = int2float
 
-let print : String -> () = lam s.
-  print s
-
-let printLine : String -> () = lam s.
-  printLn s
-
-let floatToString : Float -> String = lam f.
-  float2string f
+let print : String -> () = lam s. print s
+let printLine : String -> () = lam s. printLn s
+let floatToString : Float -> String = lam f. float2string f
+let intToString : Int -> String = lam i. int2string i
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem
