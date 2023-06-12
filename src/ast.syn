@@ -155,6 +155,7 @@ infix left And : RtpplExpr = "&&"
 infix left Or : RtpplExpr = "||"
 
 precedence {
+  ArrayAccess;
   Mul Div;
   Add Sub;
   Eq Neq Lt Gt Geq Leq;
