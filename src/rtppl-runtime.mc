@@ -212,6 +212,9 @@ let print : String -> () = lam s. print s
 let printLine : String -> () = lam s. printLn s
 let floatToString : Float -> String = lam f. float2string f
 let intToString : Int -> String = lam i. int2string i
+let printLogicalTime : () -> () = lam.
+  let wt = deref wallLogicalTime in
+  printLn (int2string (timespecToNanos wt))
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem
