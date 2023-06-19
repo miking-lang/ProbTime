@@ -307,6 +307,8 @@ lang RtpplCompileType = RtpplCompileBase + DPPLParser
     TyFloat {info = info}
   | BoolRtpplType {info = info} ->
     TyBool {info = info}
+  | StringRtpplType {info = info} ->
+    TySeq {ty = TyChar {info = info}, info = info}
   | UnitRtpplType {info = info} ->
     _tyunit info
   | SeqRtpplType {ty = ty, info = info} ->
