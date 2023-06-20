@@ -241,7 +241,8 @@ lang RtpplCompileExprExtension =
     (acc, TmRead t)
   | TmWrite t ->
     match f acc t.src with (acc, src) in
-    (acc, TmWrite {t with src = src})
+    match f acc t.delay with (acc, delay) in
+    (acc, TmWrite {t with src = src, delay = delay})
   | TmSdelay t ->
     match f acc t.e with (acc, e) in
     (acc, TmSdelay {t with e = e})
