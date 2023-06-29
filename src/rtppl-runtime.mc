@@ -216,9 +216,11 @@ let printTimes : () -> () = lam.
   let lt = deref wallLogicalTime in
   let mt = getMonotonicTime () in
   let wt = getWallClockTime () in
+  let pt = getProcessCpuTime () in
   printLn (concat "Logical time  : " (int2string (timespecToNanos lt)));
   printLn (concat "Monotonic time: " (int2string (timespecToNanos mt)));
-  printLn (concat "Wall time     : " (int2string (timespecToNanos wt)))
+  printLn (concat "Wall time     : " (int2string (timespecToNanos wt)));
+  printLn (concat "Process time  : " (int2string (timespecToNanos pt)))
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem
