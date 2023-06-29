@@ -107,7 +107,7 @@ let sdelay : (() -> ()) -> (() -> ()) -> Int -> Bool -> Int =
   updateInputs ();
   (if printTime then
     let t1 = getProcessCpuTime () in
-    printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay)))]);
+    printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay))), " overrun ", int2string overrun]);
     modref lastSdelay t1
   else ());
   overrun
