@@ -212,9 +212,13 @@ let print : String -> () = lam s. print s
 let printLine : String -> () = lam s. printLn s
 let floatToString : Float -> String = lam f. float2string f
 let intToString : Int -> String = lam i. int2string i
-let printLogicalTime : () -> () = lam.
-  let wt = deref wallLogicalTime in
-  printLn (int2string (timespecToNanos wt))
+let printTimes : () -> () = lam.
+  let lt = deref wallLogicalTime in
+  let mt = getMonotonicTime () in
+  let wt = getWallClockTime () in
+  printLn (concat "Logical time  : " (int2string (timespecToNanos lt)));
+  printLn (concat "Monotonic time: " (int2string (timespecToNanos mt)));
+  printLn (concat "Wall time     : " (int2string (timespecToNanos wt)))
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem
