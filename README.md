@@ -35,7 +35,7 @@ A ProbTime program consists of a series of top-level definitions followed by a n
 
 For concrete examples of how to write and use ProbTime programs, we refer to the `examples/` directory.
 
-### External behavior
+## External behavior
 
 In this part, we provide necessary information for defining an underlying platform for relaying messages between ProbTime tasks as well as external code interacting with ProbTime tasks via sensors and actuators.
 
@@ -43,11 +43,11 @@ For each task defined in the ProbTime program, our compiler produces one executa
 
 The binary format of a message is as follows. The first 64 bits encode the size of the remaining part of the message. We use this as certain kinds of data (distributions) may vary in size. The following 64 bits encode the timestamp associated with the message and the remaining part consists of the payload (containing `size - 8` bytes of data). Currently, the compiler supports two kinds of data.
 
-#### Floats
+### Floats
 
 A floating-point number (`Float`) is encoded as a 64-bit number.
 
-#### Distributions
+### Distributions
 
 We support encoding empirical distributions over floating-point numbers or records of floating-point numbers, e.g., `Dist(Float)` or `Dist(Pos)` where `Pos` is an alias for a record `{x : Float, y : Float}`.
 
