@@ -1,0 +1,75 @@
+// A simple coin flip model that estimates the likelihood of a coin being
+// biased, given our provided observations. We use 0.0 to denote heads and 1.0
+// to denote tails. For a fair coin, the bias should be 0.5, while a coin that
+// always yields heads has bias 0.0.
+model coinFlipModel(prior : Dist(Float), observations : [TSV(Float)]) : Float {
+  sample bias ~ prior
+  loop for obs in observations {
+    cond if value(obs) == 0.0 {
+      observe false ~ Bernoulli(bias)
+    } else {
+      observe true ~ Bernoulli(bias)
+    }
+  }
+  return bias
+}
+
+def printObs(obs : TSV(Float)) : Unit {
+  print(intToString(timestamp(obs)))
+  print(" ")
+  printLine(floatToString(value(obs)))
+}
+
+def printInput(observations : [TSV(Float)]) : Unit {
+  printLine("Received observations:")
+  loop for obs in observations {
+    printObs(obs)
+  }
+}
+
+// Compute the expected value of the distribution.
+def expectedValue(d : Dist(Float)) : Float {
+  var acc = 0.0
+  var s = samples d
+  loop acc for i in range(0, |s.s|) {
+    acc = acc + (s.s[i]) * exp(s.w[i])
+  }
+  return acc
+}
+
+// An iterative coin flip task template. We start from a uniform distribution,
+// and repeatedly update the distribution based on our new observations.
+template coinFlip() {
+  input in1 : Float
+  output out1 : Float
+
+  // We start from a uniform distribution.
+  var d = Uniform(0.0, 1.0)
+
+  // We use 'd' in the loop to indicate that its updated values should be made
+  // visible to later iterations of the loop.
+  loop d {
+    sdelay 1s
+    read in1 to indata
+    printInput(indata)
+
+    // We infer a distribution from the coin flip model using a fixed number of
+    // particles. We could have used an execution time budget, with which we
+    // will infer as many particles as we have time for during the given
+    // budget. However, this does not work well for simple models as this one,
+    // as the number of particles grows too large.
+    infer coinFlipModel(d, indata) particles 1000 to d
+
+    // We compute the expected value (the expected bias) of the current
+    // distribution and write it to the output channel.
+    write expectedValue(d) to out1
+  }
+}
+
+system {
+  sensor coin : Float
+  actuator bias : Float
+  task cf = coinFlip()
+  coin -> cf.in1
+  cf.out1 -> bias
+}
