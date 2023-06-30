@@ -64,6 +64,7 @@ lang RtpplCompileBase =
     ports : Map Name [PortData],
     topVarEnv : Map String Name,
     aliases : Map Name RtpplType,
+    consts : Map Name RtpplExpr,
     options : RtpplOptions
   }
 
@@ -240,7 +241,8 @@ lang RtpplCompileExprExtension =
     (acc, TmRead t)
   | TmWrite t ->
     match f acc t.src with (acc, src) in
-    (acc, TmWrite {t with src = src})
+    match f acc t.delay with (acc, delay) in
+    (acc, TmWrite {t with src = src, delay = delay})
   | TmSdelay t ->
     match f acc t.e with (acc, e) in
     (acc, TmSdelay {t with e = e})
@@ -306,6 +308,8 @@ lang RtpplCompileType = RtpplCompileBase + DPPLParser
     TyFloat {info = info}
   | BoolRtpplType {info = info} ->
     TyBool {info = info}
+  | StringRtpplType {info = info} ->
+    TySeq {ty = TyChar {info = info}, info = info}
   | UnitRtpplType {info = info} ->
     _tyunit info
   | SeqRtpplType {ty = ty, info = info} ->
@@ -1273,6 +1277,13 @@ lang RtpplCompile =
       rhs = printTime, ty = _tyuk info, info = info}
   | t -> smap_Expr_Expr (specializeRtpplExprs env taskId) t
 
+  sem resolveConstants : Map Name RtpplExpr -> RtpplExpr -> RtpplExpr
+  sem resolveConstants consts =
+  | var & (IdentPlusExprRtpplExpr {id = {v = id}, next = VariableRtpplExprNoIdent _}) ->
+    match mapLookup id consts with Some e then e else var
+  | t ->
+    smap_RtpplExpr_RtpplExpr (resolveConstants consts) t
+
   -- NOTE(larshum, 2023-04-11): The AST of each task is produced by performing
   -- extraction from a common AST containing all definitions from the RTPPL
   -- program combined with the shared runtime.
@@ -1280,6 +1291,7 @@ lang RtpplCompile =
   sem compileTask env acc =
   | (TaskRtpplTask {id = {v = id}, templateId = {v = tid}, args = args,
                     info = info}) & task ->
+    let args = map (resolveConstants env.consts) args in
     let runtimeIds = getRuntimeIds () in
     -- NOTE(larshum, 2023-05-30): This only works assuming the (escaped) name
     -- of the function used as a template is distinct from names used in the
@@ -1341,6 +1353,13 @@ lang RtpplCompile =
   | _ ->
     portMap
 
+  sem collectConstants : Map Name RtpplExpr -> RtpplTop -> Map Name RtpplExpr
+  sem collectConstants consts =
+  | ConstantRtpplTop {id = {v = id}, e = e} ->
+    mapInsert id (resolveConstants consts e) consts
+  | _ ->
+    consts
+
   -- NOTE(larshum, 2023-04-11): One RTPPL program is compiled to multiple
   -- Expr's, each of which correspond to a task declared in the main section of
   -- an RTPPL program.
@@ -1354,6 +1373,7 @@ lang RtpplCompile =
       ports = foldl collectPortsPerTop (mapEmpty nameCmp) p.tops,
       topVarEnv = (addTopNames symEnvEmpty coreExpr).varEnv,
       aliases = topEnv.aliases,
+      consts = foldl collectConstants (mapEmpty nameCmp) p.tops,
       options = options
     } in
     compileMain env p.main

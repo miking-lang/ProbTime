@@ -36,16 +36,16 @@ int64_t read_message_size(int fd) {
   return sz;
 }
 
-int64_t read_message(int fd, payload& p) {
+bool read_message(int fd, payload& p) {
   p.size = read_message_size(fd);
-  if (p.size == -1) {
+  if (p.size <= 0) {
     return false;
   }
   p.data = (char*)malloc(p.size);
   int64_t count = 0;
   while (count < p.size) {
     int bytes_read = read(fd, (void*)&p.data[count], p.size - count);
-    if (bytes_read <= 0) {
+    if (bytes_read == -1) {
       fprintf(stderr, "Error reading message: %s\n", strerror(errno));
       exit(1);
     }
@@ -63,30 +63,26 @@ std::vector<payload> read_messages(int fd) {
   return input_seq;
 }
 
-bool write_message_size(int fd, int64_t sz) {
+void write_message_size(int fd, int64_t sz) {
   char buffer[sizeof(int64_t)];
   memcpy((void*)buffer, (void*)&sz, sizeof(int64_t));
   int64_t count = 0;
   while (count < sizeof(int64_t)) {
     int bytes = write(fd, (void*)&buffer[count], sizeof(int64_t)-count);
-    if (bytes <= 0) {
-      return false;
+    if (bytes == -1) {
+      fprintf(stderr, "Error writing message: %s\n", strerror(errno));
+      exit(1);
     }
     count += bytes;
   }
-  return true;
 }
 
 void write_message(int fd, const payload& p) {
-  bool res = write_message_size(fd, p.size);
-  if (!res) {
-    fprintf(stderr, "Error writing message: %s\n", strerror(errno));
-    exit(1);
-  }
+  write_message_size(fd, p.size);
   int64_t count = 0;
   while (count < p.size) {
     int bytes_written = write(fd, (void*)&p.data[count], p.size - count);
-    if (bytes_written <= 0) {
+    if (bytes_written == -1) {
       fprintf(stderr, "Error writing message: %s\n", strerror(errno));
       exit(1);
     }

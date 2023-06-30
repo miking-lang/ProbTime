@@ -155,6 +155,7 @@ infix left And : RtpplExpr = "&&"
 infix left Or : RtpplExpr = "||"
 
 precedence {
+  ArrayAccess;
   Mul Div;
   Add Sub;
   Eq Neq Lt Gt Geq Leq;
@@ -174,6 +175,7 @@ prod PortSpec : RtpplPortSpec = port:LName ("." id:LIdent)?
 prod Int : RtpplType = "Int"
 prod Float : RtpplType = "Float"
 prod Bool : RtpplType = "Bool"
+prod String : RtpplType = "String"
 prod Unit : RtpplType = "Unit"
 prod Seq : RtpplType = "[" ty:RtpplType "]"
 prod Record : RtpplType =

@@ -107,7 +107,7 @@ let sdelay : (() -> ()) -> (() -> ()) -> Int -> Bool -> Int =
   updateInputs ();
   (if printTime then
     let t1 = getProcessCpuTime () in
-    printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay)))]);
+    printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay))), " overrun ", int2string overrun]);
     modref lastSdelay t1
   else ());
   overrun
@@ -212,6 +212,15 @@ let print : String -> () = lam s. print s
 let printLine : String -> () = lam s. printLn s
 let floatToString : Float -> String = lam f. float2string f
 let intToString : Int -> String = lam i. int2string i
+let printTimes : () -> () = lam.
+  let lt = deref wallLogicalTime in
+  let mt = getMonotonicTime () in
+  let wt = getWallClockTime () in
+  let pt = getProcessCpuTime () in
+  printLn (concat "Logical time  : " (int2string (timespecToNanos lt)));
+  printLn (concat "Monotonic time: " (int2string (timespecToNanos mt)));
+  printLn (concat "Wall time     : " (int2string (timespecToNanos wt)));
+  printLn (concat "Process time  : " (int2string (timespecToNanos pt)))
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem

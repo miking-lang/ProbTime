@@ -269,6 +269,7 @@ lang RtpplPrettyPrint = RtpplAst
   | IntRtpplType _ -> "Int"
   | FloatRtpplType _ -> "Float"
   | BoolRtpplType _ -> "Bool"
+  | StringRtpplType _ -> "String"
   | UnitRtpplType _ -> "Unit"
   | SeqRtpplType {ty = ty} -> join ["[", pprintRtpplType ty, "]"]
   | DistRtpplType {ty = ty} -> join ["Dist(", pprintRtpplType ty, ")"]
