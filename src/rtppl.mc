@@ -136,8 +136,8 @@ lang Rtppl =
   sem buildTaskDppl options filepath =
   | ast ->
     let runtimeData = _rts () in
-    let opts = {default with debugMExprCompile = false} in
-    let ast = mexprCompile opts runtimeData ast in
+    let dpplOpts = default in
+    let ast = mexprCompile dpplOpts runtimeData ast in
     buildTaskMExpr options filepath ast
 
   -- TODO(larshum, 2023-04-12): For now, we just use the mi compiler
