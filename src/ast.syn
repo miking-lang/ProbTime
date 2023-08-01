@@ -90,7 +90,7 @@ prod ModelDef : RtpplTop =
   "model" id:LName "(" params:RtpplTopParams ")" ":" ty:RtpplType
   "{" body:{stmts:RtpplStmt* ("return" ret:RtpplExpr)?} "}"
 prod TemplateDef : RtpplTop =
-  "template" id:LName "(" params:RtpplTopParams ")"
+  "template" id:UName "(" params:RtpplTopParams ")"
   "{" body:{ports:RtpplPort* stmts:RtpplStmt*} "}"
 
 prod Params : RtpplTopParams =
@@ -168,7 +168,7 @@ prod Main : RtpplMain =
 prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType
 prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType
 
-prod Task : RtpplTask = "task" id:LName "=" templateId:LName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")"
+prod Task : RtpplTask = "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")"
 prod Connection : RtpplConnection = from:RtpplPortSpec "->" to:RtpplPortSpec
 prod PortSpec : RtpplPortSpec = port:LName ("." id:LIdent)?
 

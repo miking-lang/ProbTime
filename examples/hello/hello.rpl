@@ -15,7 +15,7 @@ def f(data : [TSV(Float)]) : [Float] {
 // Definition of a periodic task template 'x'. We can instantiate multiple
 // tasks from each task template, by connecting its inputs and outputs
 // differently and/or by providing different arguments when instantiating it.
-template x(period : Int) {
+template X(period : Int) {
   // We declare that this template has one input port and one output port. Both
   // of these expect floating-point payloads.
   input in1 : Float
@@ -37,8 +37,8 @@ system {
   sensor src : Float
   actuator dst : Float
 
-  task a = x(500ms)
-  task b = x(250ms)
+  task a = X(500ms)
+  task b = X(250ms)
 
   src -> a.in1
   a.out1 -> b.in1

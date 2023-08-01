@@ -39,7 +39,7 @@ def expectedValue(d : Dist(Float)) : Float {
 
 // An iterative coin flip task template. We start from a uniform distribution,
 // and repeatedly update the distribution based on our new observations.
-template coinFlip() {
+template CoinFlip() {
   input in1 : Float
   output out1 : Float
 
@@ -69,7 +69,7 @@ template coinFlip() {
 system {
   sensor coin : Float
   actuator bias : Float
-  task cf = coinFlip()
+  task cf = CoinFlip()
   coin -> cf.in1
   cf.out1 -> bias
 }
