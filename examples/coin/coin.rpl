@@ -58,7 +58,7 @@ template CoinFlip() {
     // will infer as many particles as we have time for during the given
     // budget. However, this does not work well for simple models as this one,
     // as the number of particles grows too large.
-    infer coinFlipModel(d, indata) particles 1000 to d
+    infer coinFlipModel(d, indata) priority 1 to d
 
     // We compute the expected value (the expected bias) of the current
     // distribution and write it to the output channel.
@@ -69,7 +69,7 @@ template CoinFlip() {
 system {
   sensor coin : Float
   actuator bias : Float
-  task cf = CoinFlip()
+  task cf = CoinFlip() priority 1
   coin -> cf.in1
   cf.out1 -> bias
 }

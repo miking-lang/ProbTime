@@ -117,10 +117,10 @@ lang RtpplPrettyPrint = RtpplAst
     join [pprintIndent indent, "observe ", pprintRtpplExpr ii e, " ~ ", pprintRtpplExpr ii d]
   | AssumeRtpplStmt {id = {v = id}, d = d} ->
     join [pprintIndent indent, "assume ", nameGetStr id, " ~ ", pprintRtpplExpr indent d]
-  | InferRtpplStmt {id = {v = id}, model = model, extra = extra} ->
+  | InferRtpplStmt {id = {v = id}, model = model, p = {v = priority}} ->
     let ii = pprintIndentIncrement indent in
-    join [ pprintIndent indent, "infer ", nameGetStr id, " -> "
-         , pprintRtpplExpr ii model, " ", pprintRtpplInferEnd ii extra]
+    join [ pprintIndent indent, "infer ", pprintRtpplExpr ii model
+         , " priority ", int2string priority, " to ", nameGetStr id ]
   | DegenerateRtpplStmt _ ->
     join [pprintIndent indent, "degenerate"]
   | ResampleRtpplStmt _ ->
@@ -182,13 +182,6 @@ lang RtpplPrettyPrint = RtpplAst
           pprintNewline indent, "} else {\n",
           strJoin "\n" (map (pprintRtpplStmt ii) els),
           pprintNewline indent, "}"]
-
-  sem pprintRtpplInferEnd : Int -> RtpplInferEnd -> String
-  sem pprintRtpplInferEnd indent =
-  | InferBudgetRtpplInferEnd {t = t} ->
-    join ["budget ", pprintRtpplExpr indent t]
-  | InferFixedRtpplInferEnd {p = p} ->
-    join ["particles ", pprintRtpplExpr indent p]
 
   sem pprintRtpplExpr : Int -> RtpplExpr -> String
   sem pprintRtpplExpr indent =

@@ -37,8 +37,8 @@ system {
   sensor src : Float
   actuator dst : Float
 
-  task a = X(500ms)
-  task b = X(250ms)
+  task a = X(500ms) priority 1
+  task b = X(250ms) priority 1
 
   src -> a.in1
   a.out1 -> b.in1

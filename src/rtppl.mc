@@ -2,6 +2,7 @@ include "argparse.mc"
 include "ast.mc"
 include "compile.mc"
 include "pprint.mc"
+include "priority.mc"
 include "validate.mc"
 
 include "json.mc"
@@ -93,7 +94,7 @@ lang RtpplJson = RtpplAst
 end
 
 lang Rtppl =
-  RtpplCompile + RtpplValidate + RtpplPrettyPrint + RtpplJson +
+  RtpplCompile + RtpplValidate + RtpplTaskAlloc + RtpplPrettyPrint + RtpplJson +
   MExprCompile + DPPLParser +
   MExprLowerNestedPatterns + MExprTypeCheck + MCoreCompileLang
 
@@ -168,6 +169,12 @@ let program = parseRtpplExn options.file content in
   printLn (pprintRtpplProgram program)
 else ());
 validateRtpplProgram program;
+let alloc = computeTaskAllocations program in
+mapMapWithKey
+  (lam taskId. lam taskPeriod.
+    printLn (join ["Task ", nameGetStr taskId, " was allocated a period of ", int2string taskPeriod]))
+  alloc;
+exit 1;
 let result = compileRtpplProgram options program in
 (if options.debugCompileDppl then
   mapMapWithKey

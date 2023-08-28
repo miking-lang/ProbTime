@@ -1,5 +1,6 @@
 include "ast.mc"
 include "pprint.mc"
+include "priority.mc"
 include "src-loc.mc"
 
 include "common.mc"
@@ -463,105 +464,9 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
       ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
       body = TmAssume { dist = compileRtpplExpr d, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
-  | InferRtpplStmt {id = {v = id}, model = model, info = info,
-                    extra = InferBudgetRtpplInferEnd {t = t}} ->
-    let inferModelBind = TmLet {
-      ident = nameNoSym "inferModel", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmInfer {
-          method = BPF {particles = int_ env.options.particlesPerBatch},
-          model = TmLam {
-            ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
-            body = compileRtpplExpr model, ty = _tyuk info, info = info },
-          ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    let distToSamplesBind = TmLet {
-      ident = nameNoSym "distToSamples", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "d", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmApp {
-          lhs = TmConst {val = CDistEmpiricalSamples (), ty = _tyuk info, info = info},
-          rhs = _var info (nameNoSym "d"), ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    let samplesToDistBind = TmLet {
-      ident = nameNoSym "samplesToDist", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "s", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmDist {
-          dist = DEmpirical {samples = _var info (nameNoSym "s")},
-          ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    let distNormConstBind = TmLet {
-      ident = nameNoSym "distNormConst", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "d", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmApp {
-          lhs = TmConst {val = CDistEmpiricalNormConst (), ty = _tyuk info, info = info},
-          rhs = _var info (nameNoSym "d"), ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    let printInfer = TmConst {
-      val = CBool {val = env.options.printInfer},
-      ty = _tyuk info, info = info
-    } in
-    let distBind = TmLet {
-      ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmApp {
-        lhs = TmApp {
-          lhs = TmApp {
-            lhs = TmApp {
-              lhs = TmApp {
-                lhs = TmApp {
-                  lhs = _var info (getRuntimeIds ()).batchedInferRunner,
-                  rhs = _var info (nameNoSym "inferModel"),
-                  ty = _tyuk info, info = info},
-                rhs = _var info (nameNoSym "distToSamples"), ty = _tyuk info, info = info},
-              rhs = _var info (nameNoSym "samplesToDist"), ty = _tyuk info, info = info},
-            rhs = _var info (nameNoSym "distNormConst"), ty = _tyuk info, info = info},
-          rhs = compileRtpplExpr t, ty = _tyuk info, info = info},
-        rhs = printInfer, ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    bindall_
-      [ inferModelBind, distToSamplesBind, samplesToDistBind
-      , distNormConstBind, distBind ]
-  | InferRtpplStmt {id = {v = id}, model = model, info = info,
-                    extra = InferFixedRtpplInferEnd {p = p}} ->
-    let inferModelBind = TmLet {
-      ident = nameNoSym "inferModel", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmInfer {
-          method = BPF {particles = compileRtpplExpr p},
-          model = TmLam {
-            ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
-            body = compileRtpplExpr model, ty = _tyuk info, info = info },
-          ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    let printInfer = TmConst {
-      val = CBool {val = env.options.printInfer},
-      ty = _tyuk info, info = info
-    } in
-    let distBind = TmLet {
-      ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmApp {
-        lhs = TmApp {
-          lhs = _var info (getRuntimeIds ()).fixedInferRunner,
-          rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
-        rhs = printInfer, ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    bind_ inferModelBind distBind
+  | InferRtpplStmt {id = {v = id}, model = model, info = info, p = {v = p}} ->
+    -- TODO: need to include basic analysis in environment...
+    error "not implemented yet"
   | DegenerateRtpplStmt {info = info} ->
     let neginf = TmApp {
       lhs = TmApp {
