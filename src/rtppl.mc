@@ -170,11 +170,6 @@ let program = parseRtpplExn options.file content in
 else ());
 validateRtpplProgram program;
 let alloc = computeTaskAllocations program in
-mapMapWithKey
-  (lam taskId. lam taskPeriod.
-    printLn (join ["Task ", nameGetStr taskId, " was allocated a period of ", int2string taskPeriod]))
-  alloc;
-exit 1;
 let result = compileRtpplProgram options program in
 (if options.debugCompileDppl then
   mapMapWithKey

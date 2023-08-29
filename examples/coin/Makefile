@@ -5,4 +5,4 @@ cf: coin.rpl
 	rtppl $<
 
 clean:
-	rm -f cf cf-in1 cf-out1 network.json
+	rm -f cf* network.json

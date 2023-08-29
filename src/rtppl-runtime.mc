@@ -2,6 +2,7 @@ include "bool.mc"
 include "common.mc"
 include "math.mc"
 include "string.mc"
+include "ext/file-ext.mc"
 include "ext/rtppl-ext.mc"
 
 let nanosPerSec = 1000000000
@@ -63,11 +64,16 @@ let cmpTimespec : Timespec -> Timespec -> Int =
 let monoLogicalTime : Ref Timespec = ref (0,0)
 let wallLogicalTime : Ref Timespec = ref (0,0)
 
-let lastSdelay : Ref Timespec = ref (0,0)
+-- NOTE(larshum, 2023-08-28): The below references are used as part of the
+-- collection phase.
+let collectWriteChannel : Ref (Option WriteChannel) = ref (None ())
+let cpuExecutionTime : Ref Timespec = ref (0,0)
+let collectionBuffer : Ref String = ref []
+let inferBudgets : Ref [Int] = ref []
 
--- Delays execution by a given amount of delay, in milliseconds, given a
--- reference containing the start time of the current timing point. The result
--- is an integer denoting the number of milliseconds of overrun.
+-- Delays execution by a given amount of nanoseconds, given a reference
+-- containing the start time of the current timing point. The result is an
+-- integer denoting the number of nanoseconds of overrun.
 let delayBy : Int -> Int = lam delay.
   let oldPriority = rtpplSetMaxPriority () in
   let intervalTime = nanosToTimespec delay in
@@ -97,51 +103,64 @@ let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
   let lt = deref wallLogicalTime in
   (addTimespec lt (nanosToTimespec offset), value)
 
+let writeCollectionBuffer = lam msg.
+  modref collectionBuffer (join [deref collectionBuffer, msg, "\n"])
+
+let flushCollectionReport = lam wc. lam overrun.
+  let t1 = getProcessCpuTime () in
+  let cpu = timespecToNanos (diffTimespec t1 (deref cpuExecutionTime)) in
+  -- TODO(larshum, 2023-08-28): Record sizes of input sequences.
+  let str = join ["sdelay ", int2string cpu, " ", int2string overrun] in
+  writeCollectionBuffer str;
+  writeString wc (deref collectionBuffer);
+  writeFlush wc;
+  modref collectionBuffer [];
+  modref cpuExecutionTime t1
+
 -- NOTE(larshum, 2023-04-25): Before the delay, we flush the messages stored in
 -- the output buffers. After the delay, we update the contents of the input
 -- sequences by reading.
-let sdelay : (() -> ()) -> (() -> ()) -> Int -> Bool -> Int =
-  lam flushOutputs. lam updateInputs. lam delay. lam printTime.
+let sdelay : (() -> ()) -> (() -> ()) -> Int -> Int =
+  lam flushOutputs. lam updateInputs. lam delay.
   flushOutputs ();
   let overrun = delayBy delay in
   updateInputs ();
-  (if printTime then
-    let t1 = getProcessCpuTime () in
-    printLn (join ["sdelay ", int2string (timespecToNanos (diffTimespec t1 (deref lastSdelay))), " overrun ", int2string overrun]);
-    modref lastSdelay t1
+  (match deref collectWriteChannel with Some wc then
+    flushCollectionReport wc overrun
   else ());
   overrun
 
 let rtpplBatchedInferRunner =
-  lam inferModel. lam distToSamples. lam samplesToDist. lam distNormConst.
-  lam deadline. lam printTime.
-  let t0 = getProcessCpuTime () in
-  let deadlineTs = addTimespec t0 (nanosToTimespec deadline) in
+  lam inferId. lam inferModel. lam distToSamples. lam samplesToDist.
+  lam distNormConst.
+  let cpu0 = getProcessCpuTime () in
+  let wall0 = getWallClockTime () in
+  let mono0 = getMonotonicTime () in
+  let deadline = get (deref inferBudgets) inferId in
+  let deadlineTs = addTimespec mono0 (nanosToTimespec deadline) in
   let model = lam.
     let d = inferModel () in
     match distToSamples d with (s, w) in
     let nc = distNormConst d in
     let w = map (addf nc) w in
-    let n = length s in
-    create n (lam i. (get w i, get s i))
+    create (length s) (lam i. (get w i, get s i))
   in
+  let samples = rtpplBatchedInference (unsafeCoerce model) deadlineTs in
+  -- NOTE(larshum, 2023-08-29): We impose a hard limit on the upper bound on
+  -- the number of particles, to prevent later performance issues due to slower
+  -- operations on the resulting distribution. For now, this limit is
+  -- hardcoded.
   let samples =
-    rtpplBatchedInference (unsafeCoerce model) deadlineTs
+    let s = join (unsafeCoerce samples) in
+    subsequence s 0 7000
   in
-  let result = samplesToDist (join (unsafeCoerce samples)) in
-  (if printTime then
-    let t1 = getProcessCpuTime () in
-    printLn (join [int2string (timespecToNanos (diffTimespec t1 t0)), " ", int2string (length samples)])
-  else ());
-  result
-
-let rtpplFixedInferRunner =
-  lam inferModel. lam printTime.
-  let t0 = getProcessCpuTime () in
-  let result = inferModel () in
-  (if printTime then
-    let t1 = getProcessCpuTime () in
-    printLn (int2string (timespecToNanos (diffTimespec t1 t0)))
+  let result = samplesToDist samples in
+  (match deref collectWriteChannel with Some _ then
+    let budget = timespecToNanos (diffTimespec (getProcessCpuTime ()) cpu0) in
+    let wt = timespecToNanos (diffTimespec (getWallClockTime ()) wall0) in
+    let particles = length samples in
+    let str = strJoin " " (map int2string [inferId, particles, wt, budget]) in
+    writeCollectionBuffer str
   else ());
   result
 
@@ -162,9 +181,6 @@ let rtpplReadDistFloatRecord = lam fd. lam nfields.
 
 let rtpplWriteFloats =
   lam fd. lam msgs.
-  -- TODO(larshum, 2023-04-11): This function will open and close a FIFO queue
-  -- every time it is called, which may be very expensive. Therefore, we should
-  -- open them at startup and then store them until shutdown.
   iter (lam msg. rtpplWriteFloat fd msg) msgs
 
 let rtpplWriteDistFloats =
@@ -175,16 +191,37 @@ let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
-let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> (() -> a) -> () =
-  lam updateInputSequences. lam closeFileDescriptors. lam cont.
+let rtpplReadConfigurationFile = lam taskId. lam defaultBudgets.
+  let configFile = join [taskId, ".config"] in
+  if fileExists configFile then
+    let str = readFile configFile in
+    modref inferBudgets (map string2int (strSplit "\n" str))
+  else
+    let collectFile = join [taskId, ".collect"] in
+    writeFile collectFile "";
+    modref inferBudgets defaultBudgets;
+    modref collectWriteChannel (writeOpen collectFile)
+
+let closeCollectChannel = lam.
+  match deref collectWriteChannel with Some ch then writeClose ch else ()
+
+let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> [Int] -> (() -> a) -> () =
+  lam updateInputSequences. lam closeFileDescriptors. lam taskId.
+  lam defaultBudgets. lam cont.
 
   -- Sets up a signal handler on SIGINT which calls code for closing all file
   -- descriptors before terminating.
-  setSigintHandler (lam. closeFileDescriptors (); exit 0);
+  setSigintHandler (lam. closeFileDescriptors (); closeCollectChannel (); exit 0);
+
+  -- Attempt to read the configuration file. If the file is available, the task
+  -- uses the provided configuration to guide the choice of execution time
+  -- budgets for infers. Otherwise, the task executes in collection mode.
+  rtpplReadConfigurationFile taskId defaultBudgets;
 
   -- Initialize the logical time to the current time of the physical clock
   modref monoLogicalTime (getMonotonicTime ());
   modref wallLogicalTime (getWallClockTime ());
+  modref cpuExecutionTime (getProcessCpuTime ());
 
   -- Updates the contents of the input sequences.
   updateInputSequences ();
@@ -212,15 +249,6 @@ let print : String -> () = lam s. print s
 let printLine : String -> () = lam s. printLn s
 let floatToString : Float -> String = lam f. float2string f
 let intToString : Int -> String = lam i. int2string i
-let printTimes : () -> () = lam.
-  let lt = deref wallLogicalTime in
-  let mt = getMonotonicTime () in
-  let wt = getWallClockTime () in
-  let pt = getProcessCpuTime () in
-  printLn (concat "Logical time  : " (int2string (timespecToNanos lt)));
-  printLn (concat "Monotonic time: " (int2string (timespecToNanos mt)));
-  printLn (concat "Wall time     : " (int2string (timespecToNanos wt)));
-  printLn (concat "Process time  : " (int2string (timespecToNanos pt)))
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem

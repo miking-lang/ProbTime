@@ -41,12 +41,12 @@ lang RtpplCompileBase =
     writeDistFloatRecord : Name,
     tsv : Name,
     batchedInferRunner : Name,
-    fixedInferRunner : Name,
     init : Name
   }
 
   type RtpplTopEnv = {
     topId : Name,
+    infers : Map Info Int,
     portTypes : Map String RtpplType,
     aliases : Map Name RtpplType,
     runtimeIds : RuntimeIds,
@@ -64,6 +64,7 @@ lang RtpplCompileBase =
     llSolutions : Map Name (Map Name Type),
     ports : Map Name [PortData],
     topVarEnv : Map String Name,
+    taskInferBudgets : Map Name [Int],
     aliases : Map Name RtpplType,
     consts : Map Name RtpplExpr,
     options : RtpplOptions
@@ -92,7 +93,7 @@ lang RtpplCompileBase =
         "rtpplReadFloat", "rtpplReadDistFloat", "rtpplReadDistFloatRecord",
         "rtpplWriteFloats", "rtpplWriteDistFloats",
         "rtpplWriteDistFloatRecords", "tsv", "rtpplBatchedInferRunner",
-        "rtpplFixedInferRunner", "rtpplRuntimeInit"
+        "rtpplRuntimeInit"
       ] in
       let rt = readRuntime () in
       match optionMapM identity (findNamesOfStrings strs rt)
@@ -103,7 +104,7 @@ lang RtpplCompileBase =
           , readDistFloatRecord = get ids 5, writeFloat = get ids 6
           , writeDistFloat = get ids 7, writeDistFloatRecord = get ids 8
           , tsv = get ids 9, batchedInferRunner = get ids 10
-          , fixedInferRunner = get ids 11, init = get ids 12 }
+          , init = get ids 11 }
         in
         modref rtIdRef (Some result);
         result
@@ -114,6 +115,7 @@ lang RtpplCompileBase =
   sem initTopEnv =
   | options ->
     { topId = nameNoSym ""
+    , infers = mapEmpty infoCmp
     , portTypes = mapEmpty cmpString
     , aliases = mapEmpty nameCmp
     , runtimeIds = getRuntimeIds ()
@@ -385,10 +387,11 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
 
     -- NOTE(larshum, 2023-04-13): We change the name of template definitions
     -- to ensure they are distinct from anything introduced by the runtime.
-    -- Template functions may only be used from main, so we make sure ot escape
+    -- Template functions may only be used from main, so we make sure to escape
     -- their names there as well.
     let escapedId = _rtpplEscapeName id in
-    let env = {env with topId = id} in
+    match foldl mapInfersToIndex (0, mapEmpty infoCmp) stmts with (_, infers) in
+    let env = {env with topId = id, infers = infers} in
     let env = foldl buildPortTypesMap env ports in
     let body = bindall_ (map (compileRtpplStmt env) stmts) in
     ( env
@@ -396,6 +399,18 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
         ident = escapedId, tyAnnot = tyAnnot, tyBody = _tyuk info,
         body = foldl addParamToBody body params, inexpr = uunit_,
         ty = _tyuk info, info = info } )
+
+  -- Constructs a mapping from each infer used within a given statement to a
+  -- distinct integer index.
+  sem mapInfersToIndex : (Int, Map Info Int) -> RtpplStmt -> (Int, Map Info Int)
+  sem mapInfersToIndex acc =
+  | LoopPlusStmtRtpplStmt {loop = l} ->
+    sfold_RtpplLoopStmt_RtpplStmt mapInfersToIndex acc l
+  | InferRtpplStmt {info = info} ->
+    match acc with (nextIdx, inferMap) in
+    (addi nextIdx 1, mapInsert info nextIdx inferMap)
+  | stmt ->
+    sfold_RtpplStmt_RtpplStmt mapInfersToIndex acc stmt
 
   sem compileRtpplReturnExpr : Info -> Option RtpplExpr -> Expr
   sem compileRtpplReturnExpr info =
@@ -465,8 +480,76 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
       body = TmAssume { dist = compileRtpplExpr d, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
   | InferRtpplStmt {id = {v = id}, model = model, info = info, p = {v = p}} ->
-    -- TODO: need to include basic analysis in environment...
-    error "not implemented yet"
+    let inferId =
+      match mapLookup info env.infers with Some id then
+        id
+      else
+        errorSingle [info] "Infer statement was not assigned an integer ID"
+    in
+    let inferModelBind = TmLet {
+      ident = nameNoSym "inferModel", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmLam {
+        ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
+        body = TmInfer {
+          -- TODO(larshum, 2023-08-28): Do we want the number of particles per
+          -- batch to be configurable as well?
+          method = BPF {particles = int_ env.options.particlesPerBatch},
+          model = TmLam {
+            ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
+            body = compileRtpplExpr model, ty = _tyuk info, info = info },
+          ty = _tyuk info, info = info},
+        ty = _tyuk info, info = info},
+      inexpr = uunit_, ty = _tyuk info, info = info
+    } in
+    let distToSamplesBind = TmLet {
+      ident = nameNoSym "distToSamples", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmLam {
+        ident = nameNoSym "d", tyAnnot = _tyuk info, tyParam = _tyuk info,
+        body = TmApp {
+          lhs = TmConst {val = CDistEmpiricalSamples (), ty = _tyuk info, info = info},
+          rhs = _var info (nameNoSym "d"), ty = _tyuk info, info = info},
+        ty = _tyuk info, info = info},
+      inexpr = uunit_, ty = _tyuk info, info = info
+    } in
+    let samplesToDistBind = TmLet {
+      ident = nameNoSym "samplesToDist", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmLam {
+        ident = nameNoSym "s", tyAnnot = _tyuk info, tyParam = _tyuk info,
+        body = TmDist {
+          dist = DEmpirical {samples = _var info (nameNoSym "s")},
+          ty = _tyuk info, info = info},
+        ty = _tyuk info, info = info},
+      inexpr = uunit_, ty = _tyuk info, info = info
+    } in
+    let distNormConstBind = TmLet {
+      ident = nameNoSym "distNormConst", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmLam {
+        ident = nameNoSym "d", tyAnnot = _tyuk info, tyParam = _tyuk info,
+        body = TmApp {
+          lhs = TmConst {val = CDistEmpiricalNormConst (), ty = _tyuk info, info = info},
+          rhs = _var info (nameNoSym "d"), ty = _tyuk info, info = info},
+        ty = _tyuk info, info = info},
+      inexpr = uunit_, ty = _tyuk info, info = info
+    } in
+    let distBind = TmLet {
+      ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmApp {
+        lhs = TmApp {
+          lhs = TmApp {
+            lhs = TmApp {
+              lhs = TmApp {
+                lhs = _var info (getRuntimeIds ()).batchedInferRunner,
+                rhs = TmConst {val = CInt {val = inferId},
+                               ty = _tyuk info, info = info},
+                ty = _tyuk info, info = info},
+              rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
+            rhs = _var info (nameNoSym "distToSamples"), ty = _tyuk info, info = info},
+          rhs = _var info (nameNoSym "samplesToDist"), ty = _tyuk info, info = info},
+        rhs = _var info (nameNoSym "distNormConst"), ty = _tyuk info, info = info},
+      inexpr = uunit_, ty = _tyuk info, info = info
+    } in
+    bindall_ [ inferModelBind, distToSamplesBind, samplesToDistBind
+             , distNormConstBind, distBind ]
   | DegenerateRtpplStmt {info = info} ->
     let neginf = TmApp {
       lhs = TmApp {
@@ -1025,9 +1108,6 @@ lang RtpplCompileGenerated = RtpplCompileType
         ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info}
 
-  -- TODO(larshum, 2023-04-27): Do we allow writing multiple times with
-  -- decreasing delays? If yes, then we need to sort the outputs before we
-  -- write them.
   sem generateOutputFlushCode : Info -> [PortData] -> Expr
   sem generateOutputFlushCode info =
   | outputPorts ->
@@ -1086,7 +1166,7 @@ end
 
 lang RtpplCompile =
   RtpplAst + RtpplDPPLCompile + MExprLambdaLift + MExprExtract +
-  MExprEliminateDuplicateCode + RtpplCompileGenerated
+  MExprEliminateDuplicateCode + RtpplCompileGenerated + RtpplInferTaskAlloc
 
   type CompileResult = {
     tasks : Map Name Expr,
@@ -1174,12 +1254,10 @@ lang RtpplCompile =
     TmApp {
       lhs = TmApp {
         lhs = TmApp {
-          lhs = TmApp {
-            lhs = sdelayFun, rhs = _var info flushOutputsId,
-            ty = _tyuk info, info = info},
-          rhs = _var info updateInputsId, ty = _tyuk info, info = info},
-        rhs = e, ty = _tyuk info, info = info},
-      rhs = printTime, ty = _tyuk info, info = info}
+          lhs = sdelayFun, rhs = _var info flushOutputsId,
+          ty = _tyuk info, info = info},
+        rhs = _var info updateInputsId, ty = _tyuk info, info = info},
+      rhs = e, ty = _tyuk info, info = info}
   | t -> smap_Expr_Expr (specializeRtpplExprs env taskId) t
 
   sem resolveConstants : Map Name RtpplExpr -> RtpplExpr -> RtpplExpr
@@ -1211,11 +1289,22 @@ lang RtpplCompile =
         in
         let taskRun = appSeq_ (nvar_ templateId) args in
         let liftedArgsInit = getCapturedTopLevelVars env runtimeIds.init in
+        let inferBudgets =
+          match mapLookup id env.taskInferBudgets with Some budgets then
+            let toIntExpr = lam i.
+              TmConst {val = CInt {val = i}, ty = _tyuk info, info = info}
+            in
+            TmSeq {tms = map toIntExpr budgets, ty = _tyuk info, info = info}
+          else
+            errorSingle [info] "Could not compute preliminary task infer budgets"
+        in
         let initArgs =
           concat
             liftedArgsInit
             [ _var info updateInputsId
             , _var info closeFileDescriptorsId
+            , _str info (nameGetStr id)
+            , inferBudgets
             , ulam_ "" taskRun ]
         in
         let tailExpr = appSeq_ (nvar_ runtimeIds.init) initArgs in
@@ -1270,13 +1359,14 @@ lang RtpplCompile =
   -- an RTPPL program.
   sem compileRtpplProgram : RtpplOptions -> RtpplProgram -> CompileResult
   sem compileRtpplProgram options =
-  | ProgramRtpplProgram p ->
+  | prog & (ProgramRtpplProgram p) ->
     match compileRtpplToExpr options p.tops with (llSolutions, topEnv, coreExpr) in
     let env = {
       ast = coreExpr,
       llSolutions = llSolutions,
       ports = foldl collectPortsPerTop (mapEmpty nameCmp) p.tops,
       topVarEnv = (addTopNames symEnvEmpty coreExpr).varEnv,
+      taskInferBudgets = computeTaskInferAllocations prog,
       aliases = topEnv.aliases,
       consts = foldl collectConstants (mapEmpty nameCmp) p.tops,
       options = options

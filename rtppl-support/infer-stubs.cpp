@@ -15,7 +15,7 @@
 
 extern "C" {
   void raise_signal_after_deadline(struct timespec *deadline) {
-    clock_nanosleep_cputime(deadline);
+    clock_nanosleep_abstime(deadline);
     kill(getpid(), SIGUSR1);
   }
 

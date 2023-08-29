@@ -45,7 +45,7 @@ inline void timespec_monodiff_rml(struct timespec *ts_out, const struct timespec
 }
 #endif
 
-inline int clock_nanosleep_cputime(const struct timespec *req) {
+int clock_nanosleep_cputime(const struct timespec *req) {
 #ifdef __MACH__
   struct timespec ts_delta;
   int retval = clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts_delta);
@@ -59,7 +59,7 @@ inline int clock_nanosleep_cputime(const struct timespec *req) {
 #endif
 }
 
-inline int clock_nanosleep_abstime(const struct timespec *req) {
+int clock_nanosleep_abstime(const struct timespec *req) {
 #ifdef __MACH__
   struct timespec ts_delta;
   int retval = clock_get_monotonic_timespec(&ts_delta);

@@ -19,7 +19,7 @@ let rtpplDefaultOptions = {
   printSdelayTime = false,
   outputPath = "",
   file = "",
-  particlesPerBatch = 100
+  particlesPerBatch = 10
 }
 
 let optionsConfig = [
