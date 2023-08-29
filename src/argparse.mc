@@ -8,7 +8,8 @@ type RtpplOptions = {
   printSdelayTime : Bool,
   outputPath : String,
   file : String,
-  particlesPerBatch : Int
+  particlesPerBatch : Int,
+  maxParticles : Int
 }
 
 let rtpplDefaultOptions = {
@@ -19,7 +20,8 @@ let rtpplDefaultOptions = {
   printSdelayTime = false,
   outputPath = "",
   file = "",
-  particlesPerBatch = 10
+  particlesPerBatch = 10,
+  maxParticles = 10000
 }
 
 let optionsConfig = [
@@ -43,7 +45,10 @@ let optionsConfig = [
   , lam p. {p.options with outputPath = argToString p} ),
   ( [("--ppb", " ", "<n>")]
   , "Sets the number of particles to use in each inference batch"
-  , lam p. {p.options with particlesPerBatch = argToInt p} )
+  , lam p. {p.options with particlesPerBatch = argToInt p} ),
+  ( [("--max-particles", " ", "<n>")]
+  , "Sets the maximum number of particles produced by an infer"
+  , lam p. {p.options with maxParticles = argToInt p} )
 ]
 
 let printHelpMsgAndExit = lam.

@@ -538,14 +538,16 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
           lhs = TmApp {
             lhs = TmApp {
               lhs = TmApp {
-                lhs = _var info (getRuntimeIds ()).batchedInferRunner,
-                rhs = TmConst {val = CInt {val = inferId},
-                               ty = _tyuk info, info = info},
-                ty = _tyuk info, info = info},
-              rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
-            rhs = _var info (nameNoSym "distToSamples"), ty = _tyuk info, info = info},
-          rhs = _var info (nameNoSym "samplesToDist"), ty = _tyuk info, info = info},
-        rhs = _var info (nameNoSym "distNormConst"), ty = _tyuk info, info = info},
+                lhs = TmApp {
+                  lhs = _unsafe (_var info (getRuntimeIds ()).batchedInferRunner),
+                  rhs = TmConst {val = CInt {val = inferId},
+                                 ty = _tyuk info, info = info},
+                  ty = _tyuk info, info = info},
+                rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
+              rhs = _var info (nameNoSym "distToSamples"), ty = _tyuk info, info = info},
+            rhs = _var info (nameNoSym "samplesToDist"), ty = _tyuk info, info = info},
+          rhs = _var info (nameNoSym "distNormConst"), ty = _tyuk info, info = info},
+        rhs = int_ env.options.maxParticles, ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info
     } in
     bindall_ [ inferModelBind, distToSamplesBind, samplesToDistBind

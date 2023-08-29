@@ -132,7 +132,7 @@ let sdelay : (() -> ()) -> (() -> ()) -> Int -> Int =
 
 let rtpplBatchedInferRunner =
   lam inferId. lam inferModel. lam distToSamples. lam samplesToDist.
-  lam distNormConst.
+  lam distNormConst. lam maxParticles.
   let cpu0 = getProcessCpuTime () in
   let wall0 = getWallClockTime () in
   let mono0 = getMonotonicTime () in
@@ -148,11 +148,12 @@ let rtpplBatchedInferRunner =
   let samples = rtpplBatchedInference (unsafeCoerce model) deadlineTs in
   -- NOTE(larshum, 2023-08-29): We impose a hard limit on the upper bound on
   -- the number of particles, to prevent later performance issues due to slower
-  -- operations on the resulting distribution. For now, this limit is
-  -- hardcoded.
+  -- operations on the resulting distribution. This limit is applied by picking
+  -- a subset of at most the maximum number of particles after the batched
+  -- inference has run.
   let samples =
     let s = join (unsafeCoerce samples) in
-    subsequence s 0 7000
+    subsequence s 0 maxParticles
   in
   let result = samplesToDist samples in
   (match deref collectWriteChannel with Some _ then
@@ -249,6 +250,15 @@ let print : String -> () = lam s. print s
 let printLine : String -> () = lam s. printLn s
 let floatToString : Float -> String = lam f. float2string f
 let intToString : Int -> String = lam i. int2string i
+let printTimes : () -> () = lam.
+  let lt = deref wallLogicalTime in
+  let mt = getMonotonicTime () in
+  let wt = getWallClockTime () in
+  let pt = getProcessCpuTime () in
+  printLine (concat "Logical time  : " (int2string (timespecToNanos lt)));
+  printLine (concat "Monotonic time: " (int2string (timespecToNanos mt)));
+  printLine (concat "Wall time     : " (int2string (timespecToNanos wt)));
+  printLine (concat "Process time  : " (int2string (timespecToNanos pt)))
 
 let push : all a. [a] -> a -> [a] = lam s. lam elem.
   snoc s elem
