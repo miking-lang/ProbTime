@@ -165,6 +165,8 @@ lang RtpplInferTaskAlloc = RtpplTaskAlloc
 
   sem findStmtInferPriorities : [Int] -> RtpplStmt -> [Int]
   sem findStmtInferPriorities acc =
+  | LoopPlusStmtRtpplStmt {loop = loopStmt} ->
+    sfold_RtpplLoopStmt_RtpplStmt findStmtInferPriorities acc loopStmt
   | InferRtpplStmt {p = {v = priority}} ->
     snoc acc priority
   | stmt -> sfold_RtpplStmt_RtpplStmt findStmtInferPriorities acc stmt
