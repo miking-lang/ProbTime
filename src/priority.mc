@@ -92,64 +92,7 @@ lang RtpplTaskPriority = RtpplAst
     mapInsert id priority priorities
 end
 
-lang RtpplTaskAlloc = RtpplTaskPeriod + RtpplTaskPriority
-  -- We compute the allocated time available to each task based on their
-  -- priority relative to all tasks. This is an upper-bound on the available
-  -- time.
-  sem computeTaskAllocations : RtpplProgram -> Map Name Int
-  sem computeTaskAllocations =
-  | p ->
-    let taskPeriods = findProgramTaskPeriods p in
-    let taskPriorities = findProgramTaskPriorities p in
-    let prioritySum = int2float (foldl addi 0 (mapValues taskPriorities)) in
-    mapMerge
-      (lam taskPeriod. lam taskPriority.
-        match (taskPeriod, taskPriority) with (Some period, Some prio) then
-          let relPriority = divf (int2float prio) prioritySum in
-          let periodAlloc = mulf (int2float period) relPriority in
-          Some (floorfi periodAlloc)
-        else
-          error "Failed to compute static task allocations")
-      taskPeriods
-      taskPriorities
-end
-
-lang RtpplInferTaskAlloc = RtpplTaskAlloc
-  -- For each distinct task, we compute the execution budget to allocate for
-  -- each of the infers based on the task allocations and the priorities of the
-  -- infers. This is a preliminary allocation that does not take other tasks
-  -- into account.
-  -- NOTE(larshum, 2023-08-28): For now, we assume there is exactly one infer
-  -- in the main loop of the task, while there may be any number of infers in
-  -- the initialization stage. The allocation of the inference in the main loop
-  -- will always be at the end of the resulting sequence.
-  sem computeTaskInferAllocations : RtpplProgram -> Map Name [Int]
-  sem computeTaskInferAllocations =
-  | p ->
-    let taskAllocations = computeTaskAllocations p in
-    let inferPriorities = findProgramInferPriorities p in
-    mapMapWithKey
-      (lam id. lam taskAlloc.
-        match mapLookup id inferPriorities with Some inferPriority then
-          let initTaskPriority = init inferPriority in
-          let prioritySum = int2float (foldl addi 0 initTaskPriority) in
-          let ta = int2float taskAlloc in
-          let taskBudget =
-            map
-              (lam priority.
-                let relativePriority = divf (int2float priority) prioritySum in
-                let inferBudget = mulf ta relativePriority in
-                floorfi (mulf 0.8 inferBudget))
-              initTaskPriority
-          in
-          -- NOTE(larshum, 2023-08-28): We assume the last infer is the only
-          -- one executing in the main loop. Therefore, we allocate it a large
-          -- budget independently of the other infers.
-          let lastInferBudget = floorfi (mulf 0.8 (int2float taskAlloc)) in
-          snoc taskBudget lastInferBudget
-        else error "Failed to compute static infer allocations")
-      taskAllocations
-
+lang RtpplTaskInferPriority = RtpplAst
   sem findProgramInferPriorities : RtpplProgram -> Map Name [Int]
   sem findProgramInferPriorities =
   | ProgramRtpplProgram p ->
@@ -182,4 +125,76 @@ lang RtpplInferTaskAlloc = RtpplTaskAlloc
     match mapLookup templateId templateInferPriorities with Some inferPriorities then
       mapInsert id inferPriorities acc
     else errorSingle [info] "Could not find infer priorities of task template"
+end
+
+lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority + RtpplTaskInferPriority
+  type TaskData = {
+    period : Int,
+    priority : Int,
+    inferPriorities : [Int]
+  }
+
+  sem collectProgramTaskData : RtpplProgram -> Map Name TaskData
+  sem collectProgramTaskData =
+  | p & (ProgramRtpplProgram _) ->
+    let taskPeriods = findProgramTaskPeriods p in
+    let taskPriorities = findProgramTaskPriorities p in
+    let inferPriorities = findProgramInferPriorities p in
+    mapMapWithKey
+      (lam id. lam taskPeriod.
+        let taskPriority =
+          match mapLookup id taskPriorities with Some p then
+            p
+          else
+            error (concat "Could not find priority for task " (nameGetStr id))
+        in
+        let inferPriorities =
+          match mapLookup id inferPriorities with Some p then
+            p
+          else
+            error (concat "Could not find infer priorities for task " (nameGetStr id))
+        in
+        { period = taskPeriod, priority = taskPriority
+        , inferPriorities = inferPriorities })
+      taskPeriods
+end
+
+lang RtpplInferTaskAlloc = RtpplTaskData
+  -- For each distinct task, we compute a conservative execution budget to
+  -- allocate for each of the infers based on the task data.
+  -- NOTE(larshum, 2023-08-28): For now, we assume there is exactly one infer
+  -- in the main loop of the task, while there may be any number of infers in
+  -- the initialization stage. The budget of the inference in the main loop
+  -- will always be at the end of the resulting sequence.
+  sem computeTaskInferAllocations : Map Name TaskData -> Map Name [Int]
+  sem computeTaskInferAllocations =
+  | taskData ->
+    let prioritySum =
+      mapFoldWithKey (lam acc. lam. lam data. addi acc data.priority) 0 taskData
+    in
+    mapMapWithKey
+      (lam id. lam data.
+        -- Compute a preliminary execution budget available to the task based
+        -- on its period and priority.
+        let relPriority = divf (int2float data.priority) (int2float prioritySum) in
+        let budget = mulf (int2float data.period) relPriority in
+
+        -- Based on the estimated execution time budget of the task, we
+        -- compute conservative budgets for the infers within the task.
+        -- NOTE(larshum, 2023-08-30): We assume the last infer is the only one
+        -- executing in the main loop. Therefore, it is allocated a budget
+        -- independently from the others.
+        let initInferPriorities = init data.inferPriorities in
+        let inferPrioritySum = int2float (foldl addi 0 initInferPriorities) in
+        let inferBudgets =
+          map
+            (lam priority.
+              let relPriority = divf (int2float priority) inferPrioritySum in
+              let inferBudget = mulf budget relPriority in
+              floorfi (mulf 0.5 inferBudget))
+            initInferPriorities
+        in
+        let lastInferBudget = floorfi (mulf 0.5 budget) in
+        snoc inferBudgets lastInferBudget)
+      taskData
 end

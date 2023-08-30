@@ -109,7 +109,6 @@ let writeCollectionBuffer = lam msg.
 let flushCollectionReport = lam wc. lam overrun.
   let t1 = getProcessCpuTime () in
   let cpu = timespecToNanos (diffTimespec t1 (deref cpuExecutionTime)) in
-  -- TODO(larshum, 2023-08-28): Record sizes of input sequences.
   let str = join ["sdelay ", int2string cpu, " ", int2string overrun] in
   writeCollectionBuffer str;
   writeString wc (deref collectionBuffer);
@@ -134,7 +133,6 @@ let rtpplBatchedInferRunner =
   lam inferId. lam inferModel. lam distToSamples. lam samplesToDist.
   lam distNormConst. lam maxParticles.
   let cpu0 = getProcessCpuTime () in
-  let wall0 = getWallClockTime () in
   let mono0 = getMonotonicTime () in
   let deadline = get (deref inferBudgets) inferId in
   let deadlineTs = addTimespec mono0 (nanosToTimespec deadline) in
@@ -158,9 +156,8 @@ let rtpplBatchedInferRunner =
   let result = samplesToDist samples in
   (match deref collectWriteChannel with Some _ then
     let budget = timespecToNanos (diffTimespec (getProcessCpuTime ()) cpu0) in
-    let wt = timespecToNanos (diffTimespec (getWallClockTime ()) wall0) in
     let particles = length samples in
-    let str = strJoin " " (map int2string [inferId, particles, wt, budget]) in
+    let str = strJoin " " (map int2string [inferId, particles, budget]) in
     writeCollectionBuffer str
   else ());
   result
@@ -192,7 +189,7 @@ let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
-let rtpplReadConfigurationFile = lam taskId. lam defaultBudgets.
+let rtpplReadConfigurationFile = lam taskId. lam defaultBudgets. lam taskData.
   let configFile = join [taskId, ".config"] in
   if fileExists configFile then
     let str = readFile configFile in
@@ -201,14 +198,21 @@ let rtpplReadConfigurationFile = lam taskId. lam defaultBudgets.
     let collectFile = join [taskId, ".collect"] in
     writeFile collectFile "";
     modref inferBudgets defaultBudgets;
-    modref collectWriteChannel (writeOpen collectFile)
+    modref collectWriteChannel (writeOpen collectFile);
+    -- NOTE(larshum, 2023-08-30): The task data consists of
+    -- * The period of the task
+    -- * The priority of the task
+    -- * The priority of each of the infers in the task
+    -- * Maximum number of particles produced by a budgeted infer
+    let msg = strJoin " " (map int2string taskData) in
+    writeCollectionBuffer msg
 
 let closeCollectChannel = lam.
   match deref collectWriteChannel with Some ch then writeClose ch else ()
 
-let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> [Int] -> (() -> a) -> () =
+let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> [Int] -> [Int] -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam taskId.
-  lam defaultBudgets. lam cont.
+  lam inferBudgets. lam taskData. lam cont.
 
   -- Sets up a signal handler on SIGINT which calls code for closing all file
   -- descriptors before terminating.
@@ -217,7 +221,7 @@ let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> [Int] -> (()
   -- Attempt to read the configuration file. If the file is available, the task
   -- uses the provided configuration to guide the choice of execution time
   -- budgets for infers. Otherwise, the task executes in collection mode.
-  rtpplReadConfigurationFile taskId defaultBudgets;
+  rtpplReadConfigurationFile taskId inferBudgets taskData;
 
   -- Initialize the logical time to the current time of the physical clock
   modref monoLogicalTime (getMonotonicTime ());

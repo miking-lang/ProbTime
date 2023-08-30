@@ -27,7 +27,7 @@ let runtimeRef = ref (None ())
 let rtIdRef = ref (None ())
 
 lang RtpplCompileBase =
-  RtpplAst + MExprAst + MExprFindSym + BootParser + MExprSym
+  RtpplAst + MExprAst + MExprFindSym + BootParser + MExprSym + RtpplTaskData
 
   type RuntimeIds = {
     sdelay : Name,
@@ -65,6 +65,7 @@ lang RtpplCompileBase =
     ports : Map Name [PortData],
     topVarEnv : Map String Name,
     taskInferBudgets : Map Name [Int],
+    taskData : Map Name TaskData,
     aliases : Map Name RtpplType,
     consts : Map Name RtpplExpr,
     options : RtpplOptions
@@ -1275,9 +1276,15 @@ lang RtpplCompile =
   sem compileTask : CompileEnv -> CompileResult -> RtpplTask -> CompileResult
   sem compileTask env acc =
   | (TaskRtpplTask {id = {v = id}, templateId = {v = tid}, args = args,
-                    info = info}) & task ->
+                    p = {v = taskPriority}, info = info}) & task ->
     let args = map (resolveConstants env.consts) args in
     let runtimeIds = getRuntimeIds () in
+    let taskData =
+      match mapLookup id env.taskData with Some td then
+        td
+      else
+        errorSingle [info] "Could not find task data for task (compiler bug)"
+    in
     -- NOTE(larshum, 2023-05-30): This only works assuming the (escaped) name
     -- of the function used as a template is distinct from names used in the
     -- runtime. We escape the template name to ensure this is the case.
@@ -1291,15 +1298,21 @@ lang RtpplCompile =
         in
         let taskRun = appSeq_ (nvar_ templateId) args in
         let liftedArgsInit = getCapturedTopLevelVars env runtimeIds.init in
+        let toIntExpr = lam i.
+          TmConst {val = CInt {val = i}, ty = _tyuk info, info = info}
+        in
         let inferBudgets =
           match mapLookup id env.taskInferBudgets with Some budgets then
-            let toIntExpr = lam i.
-              TmConst {val = CInt {val = i}, ty = _tyuk info, info = info}
-            in
             TmSeq {tms = map toIntExpr budgets, ty = _tyuk info, info = info}
           else
             errorSingle [info] "Could not compute preliminary task infer budgets"
         in
+        let taskData = TmSeq {
+          tms = map toIntExpr (join [
+            [taskData.period, taskData.priority],
+            taskData.inferPriorities, [env.options.maxParticles]]),
+          ty = _tyuk info, info = info
+        } in
         let initArgs =
           concat
             liftedArgsInit
@@ -1307,6 +1320,7 @@ lang RtpplCompile =
             , _var info closeFileDescriptorsId
             , _str info (nameGetStr id)
             , inferBudgets
+            , taskData
             , ulam_ "" taskRun ]
         in
         let tailExpr = appSeq_ (nvar_ runtimeIds.init) initArgs in
@@ -1363,12 +1377,14 @@ lang RtpplCompile =
   sem compileRtpplProgram options =
   | prog & (ProgramRtpplProgram p) ->
     match compileRtpplToExpr options p.tops with (llSolutions, topEnv, coreExpr) in
+    let taskData = collectProgramTaskData prog in
     let env = {
       ast = coreExpr,
       llSolutions = llSolutions,
       ports = foldl collectPortsPerTop (mapEmpty nameCmp) p.tops,
       topVarEnv = (addTopNames symEnvEmpty coreExpr).varEnv,
-      taskInferBudgets = computeTaskInferAllocations prog,
+      taskInferBudgets = computeTaskInferAllocations taskData,
+      taskData = taskData,
       aliases = topEnv.aliases,
       consts = foldl collectConstants (mapEmpty nameCmp) p.tops,
       options = options

@@ -94,7 +94,7 @@ lang RtpplJson = RtpplAst
 end
 
 lang Rtppl =
-  RtpplCompile + RtpplValidate + RtpplTaskAlloc + RtpplPrettyPrint + RtpplJson +
+  RtpplCompile + RtpplValidate + RtpplPrettyPrint + RtpplJson +
   MExprCompile + DPPLParser +
   MExprLowerNestedPatterns + MExprTypeCheck + MCoreCompileLang
 
@@ -169,7 +169,6 @@ let program = parseRtpplExn options.file content in
   printLn (pprintRtpplProgram program)
 else ());
 validateRtpplProgram program;
-let alloc = computeTaskAllocations program in
 let result = compileRtpplProgram options program in
 (if options.debugCompileDppl then
   mapMapWithKey
