@@ -144,16 +144,14 @@ let rtpplBatchedInferRunner =
     create (length s) (lam i. (get w i, get s i))
   in
   let samples = rtpplBatchedInference (unsafeCoerce model) deadlineTs in
+  let samples = join (unsafeCoerce samples) in
   -- NOTE(larshum, 2023-08-29): We impose a hard limit on the upper bound on
   -- the number of particles, to prevent later performance issues due to slower
   -- operations on the resulting distribution. This limit is applied by picking
   -- a subset of at most the maximum number of particles after the batched
   -- inference has run.
-  let samples =
-    let s = join (unsafeCoerce samples) in
-    subsequence s 0 maxParticles
-  in
-  let result = samplesToDist samples in
+  let trimmedSamples = subsequence samples 0 maxParticles in
+  let result = samplesToDist trimmedSamples in
   (match deref collectWriteChannel with Some _ then
     let budget = timespecToNanos (diffTimespec (getProcessCpuTime ()) cpu0) in
     let particles = length samples in
