@@ -2,7 +2,7 @@ include "argparse.mc"
 include "ast.mc"
 include "compile.mc"
 include "pprint.mc"
-include "priority.mc"
+include "task-data.mc"
 include "validate.mc"
 
 include "json.mc"
@@ -24,11 +24,10 @@ let _rts = lam.
   let _defaultRuntimes = mapFromSeq cmpInferMethod [(_bpf, _bpfRtEntry)] in
   combineRuntimes default _defaultRuntimes
 
-lang RtpplJson = RtpplAst
+lang RtpplJson = RtpplAst + RtpplTaskData
   type RtpplNames = {
     sensors : [Name],
-    actuators : [Name],
-    tasks : [Name]
+    actuators : [Name]
   }
 
   sem optJoinPath : String -> String -> String
@@ -45,10 +44,15 @@ lang RtpplJson = RtpplAst
     {acc with actuators = cons id acc.actuators}
   | _ -> acc
 
-  sem collectTaskName : RtpplNames -> RtpplTask -> RtpplNames
-  sem collectTaskName acc =
-  | TaskRtpplTask {id = {v = id}} ->
-    {acc with tasks = cons id acc.tasks}
+  sem taskToJsonObject : Name -> TaskData -> JsonValue
+  sem taskToJsonObject id =
+  | {period = period, priority = priority} ->
+    let mapping = [
+      ("id", JsonString (nameGetStr id)),
+      ("period", JsonInt period),
+      ("importance", JsonInt priority)
+    ] in
+    JsonObject (mapFromSeq cmpString mapping)
 
   sem connectionToJsonObject : RtpplConnection -> JsonValue
   sem connectionToJsonObject =
@@ -62,33 +66,34 @@ lang RtpplJson = RtpplAst
       in
       JsonString s
     in
-    let mappings = [
+    let mapping = [
       ("from", portSpecToJsonString from),
       ("to", portSpecToJsonString to)
     ] in
-    JsonObject (mapFromSeq cmpString mappings)
+    JsonObject (mapFromSeq cmpString mapping)
 
-  sem makeJsonSpecification : RtpplNames -> [RtpplConnection] -> JsonValue
-  sem makeJsonSpecification names =
+  sem makeJsonSpecification : RtpplNames -> Map Name TaskData
+                           -> [RtpplConnection] -> JsonValue
+  sem makeJsonSpecification names taskData =
   | connections ->
     let nameToJsonString = lam id. JsonString (nameGetStr id) in
     let topMappings = [
       ("sensors", JsonArray (map nameToJsonString names.sensors)),
       ("actuators", JsonArray (map nameToJsonString names.actuators)),
-      ("tasks", JsonArray (map nameToJsonString names.tasks)),
+      ("tasks", JsonArray (mapValues (mapMapWithKey taskToJsonObject taskData))),
       ("connections", JsonArray (map connectionToJsonObject connections))
     ] in
     JsonObject (mapFromSeq cmpString topMappings)
 
   sem generateJsonNetworkSpecification : RtpplOptions -> RtpplProgram -> ()
   sem generateJsonNetworkSpecification options =
-  | ProgramRtpplProgram {
+  | prog & (ProgramRtpplProgram {
       main = MainRtpplMain {ext = ext, tasks = tasks, connections = connections}
-    } ->
-    let names = {sensors = [], actuators = [], tasks = []} in
+    }) ->
+    let names = {sensors = [], actuators = []} in
     let names = foldl collectSensorOrActuatorName names ext in
-    let names = foldl collectTaskName names tasks in
-    let json = makeJsonSpecification names connections in
+    let taskData = collectProgramTaskData prog in
+    let json = makeJsonSpecification names taskData connections in
     let path = optJoinPath options.outputPath "network.json" in
     writeFile path (json2string json)
 end
