@@ -1,7 +1,7 @@
 include "ast.mc"
 include "pprint.mc"
-include "priority.mc"
 include "src-loc.mc"
+include "task-data.mc"
 
 include "common.mc"
 include "option.mc"
@@ -64,7 +64,6 @@ lang RtpplCompileBase =
     llSolutions : Map Name (Map Name Type),
     ports : Map Name [PortData],
     topVarEnv : Map String Name,
-    taskInferBudgets : Map Name [Int],
     taskData : Map Name TaskData,
     aliases : Map Name RtpplType,
     consts : Map Name RtpplExpr,
@@ -1169,7 +1168,7 @@ end
 
 lang RtpplCompile =
   RtpplAst + RtpplDPPLCompile + MExprLambdaLift + MExprExtract +
-  MExprEliminateDuplicateCode + RtpplCompileGenerated + RtpplInferTaskAlloc
+  MExprEliminateDuplicateCode + RtpplCompileGenerated
 
   type CompileResult = {
     tasks : Map Name Expr,
@@ -1301,17 +1300,10 @@ lang RtpplCompile =
         let toIntExpr = lam i.
           TmConst {val = CInt {val = i}, ty = _tyuk info, info = info}
         in
-        let inferBudgets =
-          match mapLookup id env.taskInferBudgets with Some budgets then
-            TmSeq {tms = map toIntExpr budgets, ty = _tyuk info, info = info}
-          else
-            errorSingle [info] "Could not compute preliminary task infer budgets"
-        in
         let taskData = TmSeq {
-          tms = map toIntExpr (join [
-            [taskData.period, taskData.priority],
-            taskData.inferPriorities, [env.options.maxParticles]]),
-          ty = _tyuk info, info = info
+          tms = map toIntExpr [
+            taskData.period, taskData.priority, env.options.maxParticles
+          ], ty = _tyuk info, info = info
         } in
         let initArgs =
           concat
@@ -1319,7 +1311,6 @@ lang RtpplCompile =
             [ _var info updateInputsId
             , _var info closeFileDescriptorsId
             , _str info (nameGetStr id)
-            , inferBudgets
             , taskData
             , ulam_ "" taskRun ]
         in
@@ -1383,7 +1374,6 @@ lang RtpplCompile =
       llSolutions = llSolutions,
       ports = foldl collectPortsPerTop (mapEmpty nameCmp) p.tops,
       topVarEnv = (addTopNames symEnvEmpty coreExpr).varEnv,
-      taskInferBudgets = computeTaskInferAllocations taskData,
       taskData = taskData,
       aliases = topEnv.aliases,
       consts = foldl collectConstants (mapEmpty nameCmp) p.tops,
