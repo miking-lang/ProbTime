@@ -188,14 +188,10 @@ let rtpplWriteDistFloatRecords =
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
 let rtpplReadConfigurationFile = lam taskId. lam defaultBudgets. lam taskData.
-  let configFile = join [taskId, ".config"] in
-  if fileExists configFile then
-    let str = readFile configFile in
-    modref inferBudgets (map string2int (strSplit "\n" str))
-  else
+  let initCollectionPhase = lam budgets.
     let collectFile = join [taskId, ".collect"] in
     writeFile collectFile "";
-    modref inferBudgets defaultBudgets;
+    modref inferBudgets budgets;
     modref collectWriteChannel (writeOpen collectFile);
     -- NOTE(larshum, 2023-08-30): The task data consists of
     -- * The period of the task
@@ -204,6 +200,19 @@ let rtpplReadConfigurationFile = lam taskId. lam defaultBudgets. lam taskData.
     -- * Maximum number of particles produced by a budgeted infer
     let msg = strJoin " " (map int2string taskData) in
     writeCollectionBuffer msg
+  in
+  let configFile = join [taskId, ".config"] in
+  if fileExists configFile then
+    let str = readFile configFile in
+    match map string2int (strSplit "\n" str) with [collect] ++ budgets then
+      if eqi collect 1 then
+        modref inferBudgets budgets
+      else
+        initCollectionPhase budgets
+    else
+      error "Invalid format of configuration file"
+  else
+    initCollectionPhase defaultBudgets
 
 let closeCollectChannel = lam.
   match deref collectWriteChannel with Some ch then writeClose ch else ()
