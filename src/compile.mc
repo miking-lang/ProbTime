@@ -40,7 +40,7 @@ lang RtpplCompileBase =
     writeDistFloat : Name,
     writeDistFloatRecord : Name,
     tsv : Name,
-    batchedInferRunner : Name,
+    inferRunner : Name,
     init : Name
   }
 
@@ -92,7 +92,7 @@ lang RtpplCompileBase =
         "sdelay", "openFileDescriptor", "closeFileDescriptor",
         "rtpplReadFloat", "rtpplReadDistFloat", "rtpplReadDistFloatRecord",
         "rtpplWriteFloats", "rtpplWriteDistFloats",
-        "rtpplWriteDistFloatRecords", "tsv", "rtpplBatchedInferRunner",
+        "rtpplWriteDistFloatRecords", "tsv", "rtpplInferRunner",
         "rtpplRuntimeInit"
       ] in
       let rt = readRuntime () in
@@ -103,7 +103,7 @@ lang RtpplCompileBase =
           , readFloat = get ids 3, readDistFloat = get ids 4
           , readDistFloatRecord = get ids 5, writeFloat = get ids 6
           , writeDistFloat = get ids 7, writeDistFloatRecord = get ids 8
-          , tsv = get ids 9, batchedInferRunner = get ids 10
+          , tsv = get ids 9, inferRunner = get ids 10
           , init = get ids 11 }
         in
         modref rtIdRef (Some result);
@@ -489,11 +489,9 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
     let inferModelBind = TmLet {
       ident = nameNoSym "inferModel", tyAnnot = _tyuk info, tyBody = _tyuk info,
       body = TmLam {
-        ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
+        ident = nameNoSym "p", tyAnnot = _tyuk info, tyParam = _tyuk info,
         body = TmInfer {
-          -- TODO(larshum, 2023-08-28): Do we want the number of particles per
-          -- batch to be configurable as well?
-          method = BPF {particles = int_ env.options.particlesPerBatch},
+          method = BPF {particles = _var info (nameNoSym "p")},
           model = TmLam {
             ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
             body = compileRtpplExpr model, ty = _tyuk info, info = info },
@@ -539,7 +537,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
             lhs = TmApp {
               lhs = TmApp {
                 lhs = TmApp {
-                  lhs = _unsafe (_var info (getRuntimeIds ()).batchedInferRunner),
+                  lhs = _unsafe (_var info (getRuntimeIds ()).inferRunner),
                   rhs = TmConst {val = CInt {val = inferId},
                                  ty = _tyuk info, info = info},
                   ty = _tyuk info, info = info},

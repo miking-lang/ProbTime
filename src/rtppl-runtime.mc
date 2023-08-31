@@ -64,12 +64,16 @@ let cmpTimespec : Timespec -> Timespec -> Int =
 let monoLogicalTime : Ref Timespec = ref (0,0)
 let wallLogicalTime : Ref Timespec = ref (0,0)
 
+type InferSpec
+con ExecutionBudget : Int -> InferSpec
+con FixedParticles : Int -> InferSpec
+
 -- NOTE(larshum, 2023-08-28): The below references are used as part of the
 -- collection phase.
 let collectWriteChannel : Ref (Option WriteChannel) = ref (None ())
 let cpuExecutionTime : Ref Timespec = ref (0,0)
 let collectionBuffer : Ref String = ref []
-let inferBudgets : Ref [Int] = ref []
+let inferSpec : Ref [InferSpec] = ref []
 
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
@@ -129,33 +133,32 @@ let sdelay : (() -> ()) -> (() -> ()) -> Int -> Int =
   else ());
   overrun
 
-let rtpplBatchedInferRunner =
+let rtpplInferRunner =
   lam inferId. lam inferModel. lam distToSamples. lam samplesToDist.
   lam distNormConst. lam maxParticles.
   let cpu0 = getProcessCpuTime () in
   let mono0 = getMonotonicTime () in
-  let deadline = get (deref inferBudgets) inferId in
-  let deadlineTs = addTimespec mono0 (nanosToTimespec deadline) in
-  let model = lam.
-    let d = inferModel () in
-    match distToSamples d with (s, w) in
-    let nc = distNormConst d in
-    let w = map (addf nc) w in
-    create (length s) (lam i. (get w i, get s i))
-  in
-  let samples = rtpplBatchedInference (unsafeCoerce model) deadlineTs in
-  let samples = join (unsafeCoerce samples) in
-  -- NOTE(larshum, 2023-08-29): We impose a hard limit on the upper bound on
-  -- the number of particles, to prevent later performance issues due to slower
-  -- operations on the resulting distribution. This limit is applied by picking
-  -- a subset of at most the maximum number of particles after the batched
-  -- inference has run.
-  let trimmedSamples = subsequence samples 0 maxParticles in
-  let result = samplesToDist trimmedSamples in
+  match
+    switch get (deref inferSpec) inferId
+    case ExecutionBudget deadline then
+      let model = lam.
+        let d = inferModel 1 in
+        match distToSamples d with (s, _) in
+        let nc = distNormConst d in
+        (nc, head s)
+      in
+      let deadlineTs = addTimespec mono0 (nanosToTimespec deadline) in
+      let samples = rtpplBatchedInference (unsafeCoerce model) deadlineTs in
+      let trimmedParticles = subsequence samples 0 maxParticles in
+      let result = samplesToDist trimmedParticles in
+      (result, length samples)
+    case FixedParticles p then
+      (inferModel p, p)
+    end
+  with (result, nparticles) in
   (match deref collectWriteChannel with Some _ then
-    let budget = timespecToNanos (diffTimespec (getProcessCpuTime ()) cpu0) in
-    let particles = length samples in
-    let str = strJoin " " (map int2string [inferId, particles, budget]) in
+    let execTime = timespecToNanos (diffTimespec (getProcessCpuTime ()) cpu0) in
+    let str = strJoin " " (map int2string [inferId, nparticles, execTime]) in
     writeCollectionBuffer str
   else ());
   result
@@ -188,16 +191,28 @@ let rtpplWriteDistFloatRecords =
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
 let rtpplReadConfigurationFile = lam taskId. lam taskData.
+  let parseInferSpecification = lam spec.
+    match strSplit " " spec with [mode, strValue] then
+      let value = string2int strValue in
+      switch mode
+      case "0" then FixedParticles value
+      case "1" then ExecutionBudget value
+      case _ then error "Invalid inference specification in configuration file"
+      end
+    else
+      error "Invalid inference specification in configuration file"
+  in
   let configFile = join [taskId, ".config"] in
+  let collectFile = join [taskId, ".collect"] in
   if fileExists configFile then
     let str = readFile configFile in
-    match map string2int (strSplit "\n" str) with [collect] ++ budgets then
-      if eqi collect 1 then
-        modref inferBudgets budgets
-      else
-        let collectFile = join [taskId, ".collect"] in
+    match strSplit "\n" str with [enableCollection] ++ inferSpecifications then
+      let inferSpecs = filter (lam s. not (null s)) inferSpecifications in
+      let spec = map parseInferSpecification inferSpecs in
+      modref inferSpec spec;
+      switch enableCollection
+      case "0" then
         writeFile collectFile "";
-        modref inferBudgets budgets;
         modref collectWriteChannel (writeOpen collectFile);
         -- NOTE(larshum, 2023-08-30): The task data consists of
         -- * The period of the task
@@ -206,12 +221,15 @@ let rtpplReadConfigurationFile = lam taskId. lam taskData.
         -- * Maximum number of particles produced by a budgeted infer
         let msg = strJoin " " (map int2string taskData) in
         writeCollectionBuffer msg
+      case "1" then ()
+      case _ then error "Invalid collection enable flag in configuration file"
+      end
     else
-      error "Unexpected format of configuration file"
+      error "Invalid format of configuration file"
   else
     let msg = join [
       "A configuration file for task ", taskId, " was not found.\n",
-      "This file can be configured automatically using an assisting script, or ",
+      "This file can be configured automatically using an assisting program, or ",
       "specified manually."
     ] in
     error msg
