@@ -117,10 +117,10 @@ lang RtpplPrettyPrint = RtpplAst
     join [pprintIndent indent, "observe ", pprintRtpplExpr ii e, " ~ ", pprintRtpplExpr ii d]
   | AssumeRtpplStmt {id = {v = id}, d = d} ->
     join [pprintIndent indent, "assume ", nameGetStr id, " ~ ", pprintRtpplExpr indent d]
-  | InferRtpplStmt {id = {v = id}, model = model, p = {v = priority}} ->
+  | InferRtpplStmt {id = {v = id}, model = model} ->
     let ii = pprintIndentIncrement indent in
     join [ pprintIndent indent, "infer ", pprintRtpplExpr ii model
-         , " priority ", int2string priority, " to ", nameGetStr id ]
+         , " to ", nameGetStr id ]
   | DegenerateRtpplStmt _ ->
     join [pprintIndent indent, "degenerate"]
   | ResampleRtpplStmt _ ->

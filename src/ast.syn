@@ -101,7 +101,7 @@ prod Output : RtpplPort = "output" id:LIdent ":" ty:RtpplType
 prod Binding : RtpplStmt = "var" id:LName (":" ty:RtpplType)? "=" e:RtpplExpr
 prod Observe : RtpplStmt = "observe" e:RtpplExpr "~" d:RtpplExpr
 prod Assume : RtpplStmt = "sample" id:LName "~" d:RtpplExpr
-prod Infer : RtpplStmt = "infer" model:RtpplExpr "priority" p:Integer "to" id:LName
+prod Infer : RtpplStmt = "infer" model:RtpplExpr "to" id:LName
 prod Degenerate : RtpplStmt = "degenerate"
 prod Resample : RtpplStmt = "resample"
 prod Read : RtpplStmt = "read" port:LIdent "to" (dst:LName ("." proj:LIdent)?)
