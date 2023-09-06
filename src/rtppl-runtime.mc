@@ -65,7 +65,7 @@ let monoLogicalTime : Ref Timespec = ref (0,0)
 let wallLogicalTime : Ref Timespec = ref (0,0)
 
 type InferSpec
-con ExecutionBudget : Int -> InferSpec
+con ExecutionBudget : {budget : Int, maxParticles : Int} -> InferSpec
 con FixedParticles : Int -> InferSpec
 
 -- NOTE(larshum, 2023-08-28): The below references are used as part of the
@@ -135,19 +135,21 @@ let sdelay : (() -> ()) -> (() -> ()) -> Int -> Int =
 
 let rtpplInferRunner =
   lam inferId. lam inferModel. lam distToSamples. lam samplesToDist.
-  lam distNormConst. lam maxParticles.
+  lam distNormConst.
   let cpu0 = getProcessCpuTime () in
   let mono0 = getMonotonicTime () in
   match
     switch get (deref inferSpec) inferId
-    case ExecutionBudget deadline then
+    case ExecutionBudget {budget = budget, maxParticles = maxParticles} then
       let model = lam.
+        -- NOTE(larshum, 2023-09-06): For now, we always run a single particle
+        -- at a time when using an execution time budget.
         let d = inferModel 1 in
         match distToSamples d with (s, _) in
         let nc = distNormConst d in
         (nc, head s)
       in
-      let deadlineTs = addTimespec mono0 (nanosToTimespec deadline) in
+      let deadlineTs = addTimespec mono0 (nanosToTimespec budget) in
       let samples = rtpplBatchedInference (unsafeCoerce model) deadlineTs in
       let trimmedParticles = subsequence samples 0 maxParticles in
       let result = samplesToDist trimmedParticles in
@@ -190,13 +192,16 @@ let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
-let rtpplReadConfigurationFile = lam taskId. lam taskData.
+let rtpplReadConfigurationFile = lam taskId.
   let parseInferSpecification = lam spec.
-    match strSplit " " spec with [mode, strValue] then
-      let value = string2int strValue in
+    match strSplit " " spec with [mode] ++ rest then
       switch mode
-      case "0" then FixedParticles value
-      case "1" then ExecutionBudget value
+      case "0" then
+        match rest with [particlesStr] in
+        FixedParticles (string2int particlesStr)
+      case "1" then
+        match map string2int rest with [execBudget, maxParticles] in
+        ExecutionBudget {budget = execBudget, maxParticles = maxParticles}
       case _ then error "Invalid inference specification in configuration file"
       end
     else
@@ -213,16 +218,9 @@ let rtpplReadConfigurationFile = lam taskId. lam taskData.
       switch enableCollection
       case "0" then
         writeFile collectFile "";
-        modref collectWriteChannel (writeOpen collectFile);
-        -- NOTE(larshum, 2023-08-30): The task data consists of
-        -- * The period of the task
-        -- * The priority of the task
-        -- * The priority of each of the infers in the task
-        -- * Maximum number of particles produced by a budgeted infer
-        let msg = strJoin " " (map int2string taskData) in
-        writeCollectionBuffer msg
+        modref collectWriteChannel (writeOpen collectFile)
       case "1" then ()
-      case _ then error "Invalid collection enable flag in configuration file"
+      case _ then error "Invalid collection flag in configuration file"
       end
     else
       error "Invalid format of configuration file"
@@ -237,9 +235,8 @@ let rtpplReadConfigurationFile = lam taskId. lam taskData.
 let closeCollectChannel = lam.
   match deref collectWriteChannel with Some ch then writeClose ch else ()
 
-let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> [Int] -> (() -> a) -> () =
-  lam updateInputSequences. lam closeFileDescriptors. lam taskId.
-  lam taskData. lam cont.
+let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
+  lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.
 
   -- Sets up a signal handler on SIGINT which calls code for closing all file
   -- descriptors before terminating.
@@ -248,7 +245,7 @@ let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> [Int] -> (()
   -- Attempt to read the configuration file. If the file is available, the task
   -- uses the provided configuration to guide the choice of execution time
   -- budgets for infers. Otherwise, the task executes in collection mode.
-  rtpplReadConfigurationFile taskId taskData;
+  rtpplReadConfigurationFile taskId;
 
   -- Initialize the logical time to the current time of the physical clock
   modref monoLogicalTime (getMonotonicTime ());

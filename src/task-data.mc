@@ -92,10 +92,57 @@ lang RtpplTaskPriority = RtpplAst
     mapInsert id priority priorities
 end
 
-lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority
+lang RtpplTaskInfers = RtpplAst
+  sem countProgramTaskInfers : RtpplProgram -> Map Name Int
+  sem countProgramTaskInfers =
+  | ProgramRtpplProgram p ->
+    let templateEnv = foldl countTemplateInfers (mapEmpty nameCmp) p.tops in
+    countMainTaskInfers templateEnv p.main
+
+  sem countMainTaskInfers : Map Name Int -> RtpplMain -> Map Name Int
+  sem countMainTaskInfers templateEnv =
+  | MainRtpplMain {tasks = tasks} ->
+    foldl (findTaskInferCount templateEnv) (mapEmpty nameCmp) tasks
+
+  sem findTaskInferCount : Map Name Int -> Map Name Int -> RtpplTask -> Map Name Int
+  sem findTaskInferCount templateEnv acc =
+  | TaskRtpplTask {id = {v = id}, templateId = {v = tid}, info = info} ->
+    match mapLookup tid templateEnv with Some count then
+      mapInsert id count acc
+    else errorSingle [info] "Task is defined in terms of unknown task template"
+
+  sem countTemplateInfers : Map Name Int -> RtpplTop -> Map Name Int
+  sem countTemplateInfers env =
+  | TemplateDefRtpplTop {id = {v = id}, body = {stmts = stmts}, info = info} ->
+    let maxInt = lam l. lam. lam r. if gti l r then l else r in
+    let infers = collectInfersFromStatements stmts in
+    let count = addi (mapFoldWithKey maxInt 0 infers) 1 in
+    mapInsert id count env
+  | _ ->
+    env
+
+  sem collectInfersFromStatements : [RtpplStmt] -> Map Info Int
+  sem collectInfersFromStatements =
+  | stmts ->
+    match foldl collectStatementInfers (0, mapEmpty infoCmp) stmts with (_, env) in
+    env
+
+  sem collectStatementInfers : (Int, Map Info Int) -> RtpplStmt -> (Int, Map Info Int)
+  sem collectStatementInfers acc =
+  | LoopPlusStmtRtpplStmt {loop = l} ->
+    sfold_RtpplLoopStmt_RtpplStmt collectStatementInfers acc l
+  | InferRtpplStmt {info = info} ->
+    match acc with (nextIdx, env) in
+    (addi nextIdx 1, mapInsert info nextIdx env)
+  | stmt ->
+    sfold_RtpplStmt_RtpplStmt collectStatementInfers acc stmt
+end
+
+lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority + RtpplTaskInfers
   type TaskData = {
     period : Int,
-    priority : Int
+    priority : Int,
+    infers : Int
   }
 
   sem collectProgramTaskData : RtpplProgram -> Map Name TaskData
@@ -103,11 +150,14 @@ lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority
   | p & (ProgramRtpplProgram _) ->
     let taskPeriods = findProgramTaskPeriods p in
     let taskPriorities = findProgramTaskPriorities p in
-    mapMerge
-      (lam lhs. lam rhs.
-        match (lhs, rhs) with (Some l, Some r) then
-          Some {period = l, priority = r}
-        else
-          error "Internal error collecting data for tasks")
-      taskPeriods taskPriorities
+    let taskInfers = countProgramTaskInfers p in
+    mapMapWithKey
+      (lam k. lam period.
+        let fail = lam. error "Internal error collecting task data" in
+        let priority = optionGetOrElse fail (mapLookup k taskPriorities) in
+        let infers = optionGetOrElse fail (mapLookup k taskInfers) in
+        { period = period
+        , priority = optionGetOrElse fail (mapLookup k taskPriorities)
+        , infers = optionGetOrElse fail (mapLookup k taskInfers) })
+      taskPeriods
 end

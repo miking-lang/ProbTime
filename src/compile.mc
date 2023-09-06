@@ -64,7 +64,6 @@ lang RtpplCompileBase =
     llSolutions : Map Name (Map Name Type),
     ports : Map Name [PortData],
     topVarEnv : Map String Name,
-    taskData : Map Name TaskData,
     aliases : Map Name RtpplType,
     consts : Map Name RtpplExpr,
     options : RtpplOptions
@@ -339,7 +338,7 @@ lang RtpplCompileType = RtpplCompileBase + DPPLParser
     TyArrow {from = compileRtpplType from, to = compileRtpplType to, info = info}
 end
 
-lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
+lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTaskInfers
   sem compileRtpplTop : RtpplTopEnv -> RtpplTop -> (RtpplTopEnv, Expr)
   sem compileRtpplTop env =
   | ConstantRtpplTop {id = {v = id}, ty = ty, e = e, info = info} ->
@@ -390,7 +389,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
     -- Template functions may only be used from main, so we make sure to escape
     -- their names there as well.
     let escapedId = _rtpplEscapeName id in
-    match foldl mapInfersToIndex (0, mapEmpty infoCmp) stmts with (_, infers) in
+    let infers = collectInfersFromStatements stmts in
     let env = {env with topId = id, infers = infers} in
     let env = foldl buildPortTypesMap env ports in
     let body = bindall_ (map (compileRtpplStmt env) stmts) in
@@ -479,7 +478,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
       ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
       body = TmAssume { dist = compileRtpplExpr d, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
-  | InferRtpplStmt {id = {v = id}, model = model, info = info, p = {v = p}} ->
+  | InferRtpplStmt {id = {v = id}, model = model, info = info} ->
     let inferId =
       match mapLookup info env.infers with Some id then
         id
@@ -536,16 +535,14 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType
           lhs = TmApp {
             lhs = TmApp {
               lhs = TmApp {
-                lhs = TmApp {
-                  lhs = _unsafe (_var info (getRuntimeIds ()).inferRunner),
-                  rhs = TmConst {val = CInt {val = inferId},
-                                 ty = _tyuk info, info = info},
-                  ty = _tyuk info, info = info},
-                rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
-              rhs = _var info (nameNoSym "distToSamples"), ty = _tyuk info, info = info},
-            rhs = _var info (nameNoSym "samplesToDist"), ty = _tyuk info, info = info},
-          rhs = _var info (nameNoSym "distNormConst"), ty = _tyuk info, info = info},
-        rhs = int_ env.options.maxParticles, ty = _tyuk info, info = info},
+                lhs = _unsafe (_var info (getRuntimeIds ()).inferRunner),
+                rhs = TmConst {val = CInt {val = inferId},
+                               ty = _tyuk info, info = info},
+                ty = _tyuk info, info = info},
+              rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
+            rhs = _var info (nameNoSym "distToSamples"), ty = _tyuk info, info = info},
+          rhs = _var info (nameNoSym "samplesToDist"), ty = _tyuk info, info = info},
+        rhs = _var info (nameNoSym "distNormConst"), ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info
     } in
     bindall_ [ inferModelBind, distToSamplesBind, samplesToDistBind
@@ -1276,12 +1273,6 @@ lang RtpplCompile =
                     p = {v = taskPriority}, info = info}) & task ->
     let args = map (resolveConstants env.consts) args in
     let runtimeIds = getRuntimeIds () in
-    let taskData =
-      match mapLookup id env.taskData with Some td then
-        td
-      else
-        errorSingle [info] "Could not find task data for task (compiler bug)"
-    in
     -- NOTE(larshum, 2023-05-30): This only works assuming the (escaped) name
     -- of the function used as a template is distinct from names used in the
     -- runtime. We escape the template name to ensure this is the case.
@@ -1298,18 +1289,12 @@ lang RtpplCompile =
         let toIntExpr = lam i.
           TmConst {val = CInt {val = i}, ty = _tyuk info, info = info}
         in
-        let taskData = TmSeq {
-          tms = map toIntExpr [
-            taskData.period, taskData.priority, env.options.maxParticles
-          ], ty = _tyuk info, info = info
-        } in
         let initArgs =
           concat
             liftedArgsInit
             [ _var info updateInputsId
             , _var info closeFileDescriptorsId
             , _str info (nameGetStr id)
-            , taskData
             , ulam_ "" taskRun ]
         in
         let tailExpr = appSeq_ (nvar_ runtimeIds.init) initArgs in
@@ -1366,13 +1351,11 @@ lang RtpplCompile =
   sem compileRtpplProgram options =
   | prog & (ProgramRtpplProgram p) ->
     match compileRtpplToExpr options p.tops with (llSolutions, topEnv, coreExpr) in
-    let taskData = collectProgramTaskData prog in
     let env = {
       ast = coreExpr,
       llSolutions = llSolutions,
       ports = foldl collectPortsPerTop (mapEmpty nameCmp) p.tops,
       topVarEnv = (addTopNames symEnvEmpty coreExpr).varEnv,
-      taskData = taskData,
       aliases = topEnv.aliases,
       consts = foldl collectConstants (mapEmpty nameCmp) p.tops,
       options = options

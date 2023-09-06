@@ -46,11 +46,12 @@ lang RtpplJson = RtpplAst + RtpplTaskData
 
   sem taskToJsonObject : Name -> TaskData -> JsonValue
   sem taskToJsonObject id =
-  | {period = period, priority = priority} ->
+  | {period = period, priority = priority, infers = infers} ->
     let mapping = [
       ("id", JsonString (nameGetStr id)),
       ("period", JsonInt period),
-      ("importance", JsonInt priority)
+      ("importance", JsonInt priority),
+      ("infers", JsonInt infers)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
