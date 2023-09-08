@@ -46,35 +46,25 @@ lang RtpplJson = RtpplAst + RtpplTaskData
 
   sem taskToJsonObject : Name -> TaskData -> JsonValue
   sem taskToJsonObject id =
-  | {period = period, priority = priority, infers = infers} ->
+  | {period = period, priority = priority} ->
     let mapping = [
       ("id", JsonString (nameGetStr id)),
       ("period", JsonInt period),
-      ("importance", JsonInt priority),
-      ("infers", JsonInt infers)
+      ("importance", JsonInt priority)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
-  sem connectionToJsonObject : RtpplConnection -> JsonValue
+  sem connectionToJsonObject : (String, String) -> JsonValue
   sem connectionToJsonObject =
-  | ConnectionRtpplConnection {from = from, to = to} ->
-    let portSpecToJsonString = lam ps.
-      match ps with PortSpecRtpplPortSpec {port = {v = pid}, id = id} in
-      let s =
-        match id with Some {v = chid} then
-          join [nameGetStr pid, "-", chid]
-        else nameGetStr pid
-      in
-      JsonString s
-    in
+  | (from, to) ->
     let mapping = [
-      ("from", portSpecToJsonString from),
-      ("to", portSpecToJsonString to)
+      ("from", JsonString from),
+      ("to", JsonString to)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
   sem makeJsonSpecification : RtpplNames -> Map Name TaskData
-                           -> [RtpplConnection] -> JsonValue
+                           -> [(String, String)] -> JsonValue
   sem makeJsonSpecification names taskData =
   | connections ->
     let nameToJsonString = lam id. JsonString (nameGetStr id) in
@@ -86,14 +76,19 @@ lang RtpplJson = RtpplAst + RtpplTaskData
     ] in
     JsonObject (mapFromSeq cmpString topMappings)
 
-  sem generateJsonNetworkSpecification : RtpplOptions -> RtpplProgram -> ()
-  sem generateJsonNetworkSpecification options =
-  | prog & (ProgramRtpplProgram {
-      main = MainRtpplMain {ext = ext, tasks = tasks, connections = connections}
-    }) ->
+  sem addConfigurationTaskData : Map Name TaskData -> Map Name TaskData
+  sem addConfigurationTaskData =
+  | acc ->
+    let configTaskData = {period = 0, priority = 0} in
+    mapInsert configTaskId configTaskData acc
+
+  sem generateJsonNetworkSpecification : RtpplOptions -> [(String, String)]
+                                      -> RtpplProgram -> ()
+  sem generateJsonNetworkSpecification options connections =
+  | prog & (ProgramRtpplProgram {main = MainRtpplMain {ext = ext}}) ->
     let names = {sensors = [], actuators = []} in
     let names = foldl collectSensorOrActuatorName names ext in
-    let taskData = collectProgramTaskData prog in
+    let taskData = addConfigurationTaskData (collectProgramTaskData prog) in
     let json = makeJsonSpecification names taskData connections in
     let path = optJoinPath options.outputPath "network.json" in
     writeFile path (json2string json)
@@ -104,17 +99,17 @@ lang Rtppl =
   MExprCompile + DPPLParser +
   MExprLowerNestedPatterns + MExprTypeCheck + MCoreCompileLang
 
-  sem createPipe : RtpplOptions -> String -> ()
-  sem createPipe options =
+  sem createFile : RtpplOptions -> String -> ()
+  sem createFile options =
   | name ->
     let path = optJoinPath options.outputPath name in
-    let ifPipeExists = join ["[ -p ", path, " ]"] in
-    let mkfifo = concat "touch " path in
-    match sysRunCommand [ifPipeExists, "||", mkfifo] "" "."
+    let ifFileExists = join ["[ -e ", path, " ]"] in
+    let touch = concat "touch " path in
+    match sysRunCommand [ifFileExists, "||", touch] "" "."
     with {stderr = stderr, returncode = rc} in
     if eqi rc 0 then ()
     else
-      let msg = join ["Could not create pipe for port ", path, ": ", stderr] in
+      let msg = join ["Could not create file for port ", path, ": ", stderr] in
       error msg
 
   sem buildTaskMExpr : RtpplOptions -> String -> Expr -> ()
@@ -158,9 +153,9 @@ lang Rtppl =
 
   sem buildRtppl : RtpplOptions -> RtpplProgram -> CompileResult -> ()
   sem buildRtppl options program =
-  | {tasks = tasks, ports = ports} ->
-    iter (createPipe options) ports;
-    generateJsonNetworkSpecification options program;
+  | {tasks = tasks, ports = ports, connections = connections} ->
+    iter (createFile options) ports;
+    generateJsonNetworkSpecification options connections program;
     mapFoldWithKey (lam. lam k. lam v. buildTaskExecutable options k v) () tasks
 end
 

@@ -12,6 +12,7 @@ include "mexpr/duplicate-code-elimination.mc"
 include "mexpr/extract.mc"
 include "mexpr/lamlift.mc"
 include "mexpr/symbolize.mc"
+include "mexpr/utest-generate.mc"
 include "mexpr/utils.mc"
 
 include "coreppl::parser.mc"
@@ -23,6 +24,10 @@ let updateInputsId = nameSym "updateInputs"
 let outputSeqsId = nameSym "outputSeqs"
 let flushOutputsId = nameSym "flushOutputs"
 
+let configInPortId = "config.in"
+let configOutPortId = "collect.out"
+let configTaskId = nameSym "config.task"
+
 let runtimeRef = ref (None ())
 let rtIdRef = ref (None ())
 
@@ -33,20 +38,25 @@ lang RtpplCompileBase =
     sdelay : Name,
     openFile : Name,
     closeFile : Name,
+    readInt : Name,
     readFloat : Name,
+    readIntRecord : Name,
     readDistFloat : Name,
     readDistFloatRecord : Name,
+    writeInt : Name,
     writeFloat : Name,
+    writeIntRecord : Name,
     writeDistFloat : Name,
     writeDistFloatRecord : Name,
     tsv : Name,
-    inferRunner : Name,
+    fixedInferRunner : Name,
+    mainInferRunner : Name,
     init : Name
   }
 
   type RtpplTopEnv = {
     topId : Name,
-    infers : Map Info Int,
+    mainInferInfo : Info,
     portTypes : Map String RtpplType,
     aliases : Map Name RtpplType,
     runtimeIds : RuntimeIds,
@@ -89,21 +99,24 @@ lang RtpplCompileBase =
     else
       let strs = [
         "sdelay", "openFileDescriptor", "closeFileDescriptor",
-        "rtpplReadFloat", "rtpplReadDistFloat", "rtpplReadDistFloatRecord",
-        "rtpplWriteFloats", "rtpplWriteDistFloats",
-        "rtpplWriteDistFloatRecords", "tsv", "rtpplInferRunner",
-        "rtpplRuntimeInit"
+        "rtpplReadInt", "rtpplReadFloat", "rtpplReadIntRecord",
+        "rtpplReadDistFloat", "rtpplReadDistFloatRecord", "rtpplWriteInts",
+        "rtpplWriteFloats", "rtpplWriteIntRecords",
+        "rtpplWriteDistFloats", "rtpplWriteDistFloatRecords", "tsv",
+        "rtpplFixedInferRunner", "rtpplMainInferRunner", "rtpplRuntimeInit"
       ] in
       let rt = readRuntime () in
       match optionMapM identity (findNamesOfStrings strs rt)
       with Some ids then
         let result =
           { sdelay = get ids 0, openFile = get ids 1, closeFile = get ids 2
-          , readFloat = get ids 3, readDistFloat = get ids 4
-          , readDistFloatRecord = get ids 5, writeFloat = get ids 6
-          , writeDistFloat = get ids 7, writeDistFloatRecord = get ids 8
-          , tsv = get ids 9, inferRunner = get ids 10
-          , init = get ids 11 }
+          , readInt = get ids 3, readFloat = get ids 4
+          , readIntRecord = get ids 5, readDistFloat = get ids 6
+          , readDistFloatRecord = get ids 7, writeInt = get ids 8
+          , writeFloat = get ids 9, writeIntRecord = get ids 10
+          , writeDistFloat = get ids 11, writeDistFloatRecord = get ids 12
+          , tsv = get ids 13, fixedInferRunner = get ids 14
+          , mainInferRunner = get ids 15, init = get ids 16 }
         in
         modref rtIdRef (Some result);
         result
@@ -114,7 +127,7 @@ lang RtpplCompileBase =
   sem initTopEnv =
   | options ->
     { topId = nameNoSym ""
-    , infers = mapEmpty infoCmp
+    , mainInferInfo = NoInfo ()
     , portTypes = mapEmpty cmpString
     , aliases = mapEmpty nameCmp
     , runtimeIds = getRuntimeIds ()
@@ -390,7 +403,13 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     -- their names there as well.
     let escapedId = _rtpplEscapeName id in
     let infers = collectInfersFromStatements stmts in
-    let env = {env with topId = id, infers = infers} in
+    let maxInferInfo =
+      match max (lam x. lam y. subi x.1 y.1) (mapBindings infers) with Some e then
+        e.0
+      else
+        NoInfo ()
+    in
+    let env = {env with topId = id, mainInferInfo = maxInferInfo} in
     let env = foldl buildPortTypesMap env ports in
     let body = bindall_ (map (compileRtpplStmt env) stmts) in
     ( env
@@ -479,11 +498,11 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       body = TmAssume { dist = compileRtpplExpr d, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
   | InferRtpplStmt {id = {v = id}, model = model, info = info} ->
-    let inferId =
-      match mapLookup info env.infers with Some id then
-        id
+    let inferFuncId =
+      if eqi (infoCmp info env.mainInferInfo) 0 then
+        (getRuntimeIds ()).mainInferRunner
       else
-        errorSingle [info] "Infer statement was not assigned an integer ID"
+        (getRuntimeIds ()).fixedInferRunner
     in
     let inferModelBind = TmLet {
       ident = nameNoSym "inferModel", tyAnnot = _tyuk info, tyBody = _tyuk info,
@@ -498,55 +517,14 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
         ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info
     } in
-    let distToSamplesBind = TmLet {
-      ident = nameNoSym "distToSamples", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "d", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmApp {
-          lhs = TmConst {val = CDistEmpiricalSamples (), ty = _tyuk info, info = info},
-          rhs = _var info (nameNoSym "d"), ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    let samplesToDistBind = TmLet {
-      ident = nameNoSym "samplesToDist", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "s", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmDist {
-          dist = DEmpirical {samples = _var info (nameNoSym "s")},
-          ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    let distNormConstBind = TmLet {
-      ident = nameNoSym "distNormConst", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = nameNoSym "d", tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = TmApp {
-          lhs = TmConst {val = CDistEmpiricalNormConst (), ty = _tyuk info, info = info},
-          rhs = _var info (nameNoSym "d"), ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
     let distBind = TmLet {
       ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
       body = TmApp {
-        lhs = TmApp {
-          lhs = TmApp {
-            lhs = TmApp {
-              lhs = TmApp {
-                lhs = _unsafe (_var info (getRuntimeIds ()).inferRunner),
-                rhs = TmConst {val = CInt {val = inferId},
-                               ty = _tyuk info, info = info},
-                ty = _tyuk info, info = info},
-              rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
-            rhs = _var info (nameNoSym "distToSamples"), ty = _tyuk info, info = info},
-          rhs = _var info (nameNoSym "samplesToDist"), ty = _tyuk info, info = info},
-        rhs = _var info (nameNoSym "distNormConst"), ty = _tyuk info, info = info},
+        lhs = _unsafe (_var info inferFuncId),
+        rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info
     } in
-    bindall_ [ inferModelBind, distToSamplesBind, samplesToDistBind
-             , distNormConstBind, distBind ]
+    bindall_ [ inferModelBind, distBind ]
   | DegenerateRtpplStmt {info = info} ->
     let neginf = TmApp {
       lhs = TmApp {
@@ -860,6 +838,10 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
 end
 
 lang RtpplCompileGenerated = RtpplCompileType
+  sem isIntField =
+  | {ty = IntRtpplType _} -> true
+  | _ -> false
+
   sem isFloatField =
   | {ty = FloatRtpplType _} -> true
   | _ -> false
@@ -927,10 +909,28 @@ lang RtpplCompileGenerated = RtpplCompileType
 
   sem rtpplReadExprType : RuntimeIds -> Expr -> RtpplType -> Expr
   sem rtpplReadExprType rtIds fdExpr =
+  | IntRtpplType {info = info} ->
+    TmApp {
+      lhs = _var info rtIds.readInt, rhs = fdExpr,
+      ty = _tyuk info, info = info }
   | FloatRtpplType {info = info} ->
     TmApp {
       lhs = _var info rtIds.readFloat, rhs = fdExpr,
       ty = _tyuk info, info = info }
+  | RecordRtpplType {info = info, fields = fields} ->
+    if forAll isIntField fields then
+      TmApp {
+        lhs = TmApp {
+          lhs = _var info rtIds.readIntRecord, rhs = fdExpr,
+          ty = _tyuk info, info = info },
+        rhs = TmConst {
+          val = CInt {val = length fields}, ty = _tyuk info, info = info},
+        ty = _tyuk info, info = info}
+    else
+      let distLimitErrMsg =
+        "The ProbTime compiler only supports reading records of integers\n"
+      in
+      errorSingle [info] distLimitErrMsg
   | DistRtpplType {ty = FloatRtpplType _, info = info} ->
     let transformExpr = encodingToDistribution info in
     TmApp {
@@ -958,7 +958,7 @@ lang RtpplCompileGenerated = RtpplCompileType
         ty = _tyuk info, info = info}
     else
       let distLimitErrMsg = join [
-        "Currently, the compiler only supports reading distributions of records\n",
+        "The ProbTime compiler only supports reading distributions of records\n",
         "where all fields are floating-point numbers."
       ] in
       errorSingle [info] distLimitErrMsg
@@ -967,12 +967,34 @@ lang RtpplCompileGenerated = RtpplCompileType
 
   sem rtpplWriteExprType : RuntimeIds -> Expr -> Expr -> RtpplType -> Expr
   sem rtpplWriteExprType rtIds fdExpr msgsExpr =
+  | IntRtpplType {info = info} ->
+    TmApp {
+      lhs = TmApp {
+        lhs = _var info rtIds.writeInt, rhs = fdExpr,
+        ty = _tyuk info, info = info},
+      rhs = msgsExpr, ty = _tyuk info, info = info}
   | FloatRtpplType {info = info} ->
     TmApp {
       lhs = TmApp {
         lhs = _var info rtIds.writeFloat, rhs = fdExpr,
         ty = _tyuk info, info = info},
       rhs = msgsExpr, ty = _tyuk info, info = info}
+  | RecordRtpplType {info = info, fields = fields} ->
+    if forAll isIntField fields then
+      TmApp {
+        lhs = TmApp {
+          lhs = TmApp {
+            lhs = _var info rtIds.writeIntRecord, rhs = fdExpr,
+            ty = _tyuk info, info = info},
+          rhs = TmConst {
+            val = CInt {val = length fields}, ty = _tyuk info, info = info},
+          ty = _tyuk info, info = info},
+        rhs = msgsExpr, ty = _tyuk info, info = info}
+    else
+        let distLimitErrMsg =
+          "The ProbTime compiler only supports writing records of integers\n"
+        in
+        errorSingle [info] distLimitErrMsg
   | DistRtpplType {ty = FloatRtpplType _, info = info} ->
     let transformExpr = distributionToEncoding info in
     TmApp {
@@ -1004,7 +1026,7 @@ lang RtpplCompileGenerated = RtpplCompileType
         ty = _tyuk info, info = info}
     else
       let distLimitErrMsg = join [
-        "Currently, the compiler only supports writing distributions of records\n",
+        "The ProbTime compiler only supports writing distributions of records\n",
         "where all fields are floating-point numbers."
       ] in
       errorSingle [info] distLimitErrMsg
@@ -1163,11 +1185,13 @@ end
 
 lang RtpplCompile =
   RtpplAst + RtpplDPPLCompile + MExprLambdaLift + MExprExtract +
-  MExprEliminateDuplicateCode + RtpplCompileGenerated
+  BootParser + MExprUtestGenerate + MExprEliminateDuplicateCode +
+  RtpplCompileGenerated
 
   type CompileResult = {
     tasks : Map Name Expr,
-    ports : [String]
+    ports : [String],
+    connections : [(String, String)]
   }
 
   sem toPortData : RtpplPort -> PortData
@@ -1324,11 +1348,56 @@ lang RtpplCompile =
   | t ->
     sfold_Expr_Expr identifiersInExpr acc t
 
+  sem addConfigurationTask : CompileResult -> CompileResult
+  sem addConfigurationTask =
+  | result ->
+    let result =
+      mapFoldWithKey
+        (lam result. lam taskId. lam.
+          let taskInPort = join [nameGetStr taskId, "-", configInPortId] in
+          let taskOutPort = join [nameGetStr taskId, "-", configOutPortId] in
+          let configInPort = join [nameGetStr configTaskId, "-", nameGetStr taskId, ".in"] in
+          let configOutPort = join [nameGetStr configTaskId, "-", nameGetStr taskId, ".out"] in
+          let ports =
+            concat result.ports
+              [taskInPort, taskOutPort, configInPort, configOutPort]
+          in
+          let connIn = (configOutPort, taskInPort) in
+          let connOut = (taskOutPort, configInPort) in
+          let connections = concat result.connections [connIn, connOut] in
+          {result with connections = connections, ports = ports})
+        result
+        result.tasks
+    in
+    let configTaskPath = concat rtpplSrcLoc "rtppl-configurator.mc" in
+    let configTaskBody =
+      parseMCoreFile defaultBootParserParseMCoreFileArg configTaskPath
+    in
+    let configTaskBody = stripUtests (symbolize configTaskBody) in
+    {result with tasks = mapInsert configTaskId configTaskBody result.tasks}
+
+  sem portSpecToString : RtpplPortSpec -> String
+  sem portSpecToString =
+  | PortSpecRtpplPortSpec {port = {v = portId}, id = Some {v = taskId}} ->
+    join [nameGetStr portId, "-", taskId]
+  | PortSpecRtpplPortSpec {port = {v = portId}, id = None _} ->
+    nameGetStr portId
+
+  sem addConnectionToResult : CompileResult -> RtpplConnection -> CompileResult
+  sem addConnectionToResult acc =
+  | ConnectionRtpplConnection {from = from, to = to} ->
+    let conn = (portSpecToString from, portSpecToString to) in
+    {acc with connections = cons conn acc.connections}
+
   sem compileMain : CompileEnv -> RtpplMain -> CompileResult
   sem compileMain env =
   | MainRtpplMain {tasks = tasks, connections = connections} ->
-    let emptyResult = { tasks = mapEmpty nameCmp, ports = [] } in
-    foldl (compileTask env) emptyResult tasks
+    let emptyResult = {
+      tasks = mapEmpty nameCmp, ports = [], connections = []
+    } in
+    let result = foldl (compileTask env) emptyResult tasks in
+    let result = foldl addConnectionToResult result connections in
+    addConfigurationTask result
 
   sem collectPortsPerTop : Map Name [PortData] -> RtpplTop -> Map Name [PortData]
   sem collectPortsPerTop portMap =
@@ -1336,6 +1405,34 @@ lang RtpplCompile =
     mapInsert id (map toPortData ports) portMap
   | _ ->
     portMap
+
+  sem collectPorts : [RtpplTop] -> Map Name [PortData]
+  sem collectPorts =
+  | tops ->
+    let addImplicitPorts = lam id. lam ports.
+      -- NOTE(larshum, 2023-09-07): We add implicit input and output ports
+      -- to each task template. These are used to communicate with a
+      -- coordinating task, which configures the number of particles to use in
+      -- inference for all (other) tasks.
+      let info = NoInfo () in
+      let configInputPort = {
+        id = configInPortId, isInput = true,
+        ty = IntRtpplType {info = info}
+      } in
+      let collectOutputPort = {
+        id = configOutPortId, isInput = false,
+        ty = RecordRtpplType {
+          fields = [
+            {id = {i = info, v = "0"}, ty = IntRtpplType {info = info}},
+            {id = {i = info, v = "1"}, ty = IntRtpplType {info = info}},
+            {id = {i = info, v = "2"}, ty = IntRtpplType {info = info}}],
+          info = info
+        }
+      } in
+      concat ports [configInputPort, collectOutputPort]
+    in
+    let portMap = foldl collectPortsPerTop (mapEmpty nameCmp) tops in
+    mapMapWithKey addImplicitPorts portMap
 
   sem collectConstants : Map Name RtpplExpr -> RtpplTop -> Map Name RtpplExpr
   sem collectConstants consts =
@@ -1354,7 +1451,7 @@ lang RtpplCompile =
     let env = {
       ast = coreExpr,
       llSolutions = llSolutions,
-      ports = foldl collectPortsPerTop (mapEmpty nameCmp) p.tops,
+      ports = collectPorts p.tops,
       topVarEnv = (addTopNames symEnvEmpty coreExpr).varEnv,
       aliases = topEnv.aliases,
       consts = foldl collectConstants (mapEmpty nameCmp) p.tops,

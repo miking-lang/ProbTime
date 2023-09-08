@@ -108,12 +108,12 @@ inline int64_t timespec_value_to_int64(value ts) {
 
 extern "C" {
 
-  value open_file_nonblocking_stub(value pipe) {
-    CAMLparam1(pipe);
-    const char *pipe_id = String_val(pipe);
-    int fd = open(pipe_id, O_RDWR | O_NONBLOCK);
+  value open_file_nonblocking_stub(value file) {
+    CAMLparam1(file);
+    const char *filename = String_val(file);
+    int fd = open(filename, O_RDWR | O_NONBLOCK);
     if (fd == -1) {
-      fprintf(stderr, "Could not open pipe %s: %s\n", pipe_id, strerror(errno));
+      fprintf(stderr, "Could not open file %s: %s\n", filename, strerror(errno));
       exit(1);
     }
     CAMLreturn(Val_int(fd));
@@ -125,7 +125,45 @@ extern "C" {
     CAMLreturn0;
   }
 
-  value read_float_named_pipe_stub(value fd) {
+  value rtppl_read_int_stub(value fd) {
+    CAMLparam1(fd);
+    CAMLlocal2(out, tsv);
+    std::vector<payload> input_seq = read_messages(Int_val(fd));
+    out = caml_alloc(input_seq.size(), 0);
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      caml_initialize(&Field(out, i), Val_unit);
+    }
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      const payload &p = input_seq[i];
+      int64_t ts;
+      memcpy(&ts, (char*)p.data, sizeof(int64_t));
+      tsv = caml_alloc(2, 0);
+      Store_field(tsv, 0, to_timespec_value(ts));
+      int64_t val;
+      memcpy(&val, (char*)p.data + sizeof(int64_t), sizeof(int64_t));
+      Store_field(tsv, 1, Val_long(val));
+      free(p.data);
+      Store_field(out, i, tsv);
+    }
+    CAMLreturn(out);
+  }
+
+  void rtppl_write_int_stub(value fd, value tsv) {
+    CAMLparam2(fd, tsv);
+    payload p;
+    p.size = sizeof(int64_t) + sizeof(int64_t);
+    p.data = (char*)malloc(p.size);
+    value ts = Field(tsv, 0);
+    int64_t timestamp = timespec_value_to_int64(ts);
+    memcpy(p.data, (void*)&timestamp, sizeof(int64_t));
+    value v = Field(tsv, 1);
+    int64_t data = Long_val(v);
+    memcpy(p.data + sizeof(int64_t), (void*)&data, sizeof(int64_t));
+    write_message(Int_val(fd), p);
+    CAMLreturn0;
+  }
+
+  value rtppl_read_float_stub(value fd) {
     CAMLparam1(fd);
     CAMLlocal2(out, tsv);
     std::vector<payload> input_seq = read_messages(Int_val(fd));
@@ -148,7 +186,7 @@ extern "C" {
     CAMLreturn(out);
   }
 
-  void write_float_named_pipe_stub(value fd, value tsv) {
+  void rtppl_write_float_stub(value fd, value tsv) {
     CAMLparam2(fd, tsv);
     payload p;
     p.size = sizeof(int64_t) + sizeof(double);
@@ -164,7 +202,62 @@ extern "C" {
     CAMLreturn0;
   }
 
-  value read_dist_float_named_pipe_stub(value fd) {
+  value rtppl_read_int_record_stub(value fd, value nfields_val) {
+    CAMLparam2(fd, nfields_val);
+    CAMLlocal3(out, tsv, entry);
+    int64_t nfields = Long_val(nfields_val);
+    std::vector<payload> input_seq = read_messages(Int_val(fd));
+    out = caml_alloc(input_seq.size(), 0);
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      caml_initialize(&Field(out, i), Val_unit);
+    }
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      const payload &p = input_seq[i];
+      int64_t ts;
+      tsv = caml_alloc(2, 0);
+      char *ptr = p.data;
+      memcpy(&ts, ptr, sizeof(int64_t));
+      ptr += sizeof(int64_t);
+      Store_field(tsv, 0, to_timespec_value(ts));
+      entry = caml_alloc(nfields, 0);
+      for (size_t j = 0; j < nfields; j++) {
+        caml_initialize(&Field(entry, j), Val_unit);
+      }
+      for (size_t j = 0; j < nfields; j++) {
+        int64_t v;
+        memcpy(&v, ptr, sizeof(int64_t));
+        ptr += sizeof(int64_t);
+        Store_field(entry, j, Val_long(v));
+      }
+      Store_field(tsv, 1, entry);
+      Store_field(out, i, tsv);
+    }
+    CAMLreturn(out);
+  }
+
+  void rtppl_write_int_record_stub(value fd, value nfields_val, value tsv) {
+    CAMLparam3(fd, nfields_val, tsv);
+    int64_t nfields = Long_val(nfields_val);
+    payload p;
+    p.size = (nfields + 1) * sizeof(int64_t);
+    p.data = (char*)malloc(p.size);
+    char *ptr = p.data;
+    value ts = Field(tsv, 0);
+    int64_t timestamp = timespec_value_to_int64(ts);
+    memcpy(ptr, (void*)&timestamp, sizeof(int64_t));
+    ptr += sizeof(int64_t);
+    value entry = Field(tsv, 1);
+    for (size_t i = 0; i < nfields; i++) {
+      int64_t v = Long_val(Field(entry, i));
+      memcpy(ptr, (void*)&v, sizeof(int64_t));
+      ptr += sizeof(int64_t);
+    }
+    write_message(Int_val(fd), p);
+    free(p.data);
+    CAMLreturn0;
+  }
+
+  value rtppl_read_dist_float_stub(value fd) {
     CAMLparam1(fd);
     CAMLlocal4(out, dist_samples, entry, tsv);
     std::vector<payload> input_seq = read_messages(Int_val(fd));
@@ -204,7 +297,7 @@ extern "C" {
     CAMLreturn(out);
   }
 
-  void write_dist_float_named_pipe_stub(value fd, value tsv) {
+  void rtppl_write_dist_float_stub(value fd, value tsv) {
     CAMLparam2(fd, tsv);
     value ts = Field(tsv, 0);
     value d = Field(tsv, 1);
@@ -231,7 +324,7 @@ extern "C" {
     CAMLreturn0;
   }
 
-  value read_dist_float_record_named_pipe_stub(value fd, value nfields_val) {
+  value rtppl_read_dist_float_record_stub(value fd, value nfields_val) {
     CAMLparam2(fd, nfields_val);
     CAMLlocal5(out, dist_samples, sample, tsv, s);
     std::vector<payload> input_seq = read_messages(Int_val(fd));
@@ -280,7 +373,7 @@ extern "C" {
     CAMLreturn(out);
   }
 
-  void write_dist_float_record_named_pipe_stub(value fd, value nfields_val, value tsv) {
+  void rtppl_write_dist_float_record_stub(value fd, value nfields_val, value tsv) {
     CAMLparam3(fd, nfields_val, tsv);
     value ts = Field(tsv, 0);
     value d = Field(tsv, 1);

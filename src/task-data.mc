@@ -141,8 +141,7 @@ end
 lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority + RtpplTaskInfers
   type TaskData = {
     period : Int,
-    priority : Int,
-    infers : Int
+    priority : Int
   }
 
   sem collectProgramTaskData : RtpplProgram -> Map Name TaskData
@@ -150,14 +149,11 @@ lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority + RtpplTaskInfers
   | p & (ProgramRtpplProgram _) ->
     let taskPeriods = findProgramTaskPeriods p in
     let taskPriorities = findProgramTaskPriorities p in
-    let taskInfers = countProgramTaskInfers p in
-    mapMapWithKey
-      (lam k. lam period.
-        let fail = lam. error "Internal error collecting task data" in
-        let priority = optionGetOrElse fail (mapLookup k taskPriorities) in
-        let infers = optionGetOrElse fail (mapLookup k taskInfers) in
-        { period = period
-        , priority = optionGetOrElse fail (mapLookup k taskPriorities)
-        , infers = optionGetOrElse fail (mapLookup k taskInfers) })
-      taskPeriods
+    mapMerge
+      (lam l. lam r.
+        match (l, r) with (Some lhs, Some rhs) then
+          Some {period = lhs, priority = rhs}
+        else
+          error "Internal error collecting task data")
+      taskPeriods taskPriorities
 end

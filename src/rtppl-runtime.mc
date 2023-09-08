@@ -63,17 +63,12 @@ let cmpTimespec : Timespec -> Timespec -> Int =
 -- These are initialized at the end of the initialization function.
 let monoLogicalTime : Ref Timespec = ref (0,0)
 let wallLogicalTime : Ref Timespec = ref (0,0)
-
-type InferSpec
-con ExecutionBudget : {budget : Int, maxParticles : Int} -> InferSpec
-con FixedParticles : Int -> InferSpec
-
--- NOTE(larshum, 2023-08-28): The below references are used as part of the
--- collection phase.
-let collectWriteChannel : Ref (Option WriteChannel) = ref (None ())
 let cpuExecutionTime : Ref Timespec = ref (0,0)
-let collectionBuffer : Ref String = ref []
-let inferSpec : Ref [InferSpec] = ref []
+
+let collectionModeEnabled : Ref Bool = ref false
+let particleCount : Ref Int = ref 0
+let collectOutputSeq : Ref [(Timespec, (Int, Int, Int))] = ref []
+let configInputSeq : Ref [(Timespec, Int)] = ref []
 
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
@@ -94,6 +89,7 @@ let delayBy : Int -> Int = lam delay.
   in
   modref monoLogicalTime waitTime;
   modref wallLogicalTime (addTimespec (deref wallLogicalTime) intervalTime);
+  modref cpuExecutionTime (getProcessCpuTime ());
   rtpplSetPriority oldPriority;
   overrun
 
@@ -107,18 +103,23 @@ let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
   let lt = deref wallLogicalTime in
   (addTimespec lt (nanosToTimespec offset), value)
 
-let writeCollectionBuffer = lam msg.
-  modref collectionBuffer (join [deref collectionBuffer, msg, "\n"])
+let writeCollectionMessage = lam cpu1. lam overrun.
+  if deref collectionModeEnabled then
+    let execTime = timespecToNanos (diffTimespec cpu1 (deref cpuExecutionTime)) in
+    let nparticles = deref particleCount in
+    let msg = tsv 0 (execTime, nparticles, overrun) in
+    modref collectOutputSeq
+      (cons msg (deref collectOutputSeq))
+  else ()
 
-let flushCollectionReport = lam wc. lam overrun.
-  let t1 = getProcessCpuTime () in
-  let cpu = timespecToNanos (diffTimespec t1 (deref cpuExecutionTime)) in
-  let str = join ["sdelay ", int2string cpu, " ", int2string overrun] in
-  writeCollectionBuffer str;
-  writeString wc (deref collectionBuffer);
-  writeFlush wc;
-  modref collectionBuffer [];
-  modref cpuExecutionTime t1
+let readConfigMessages = lam.
+  -- NOTE(larshum, 2023-09-07): We use the most recently received value as our
+  -- new particle count for inference.
+  if deref collectionModeEnabled then
+    match deref configInputSeq with _ ++ [(_, particles)] then
+      modref particleCount particles
+    else ()
+  else ()
 
 -- NOTE(larshum, 2023-04-25): Before the delay, we flush the messages stored in
 -- the output buffers. After the delay, we update the contents of the input
@@ -126,44 +127,22 @@ let flushCollectionReport = lam wc. lam overrun.
 let sdelay : (() -> ()) -> (() -> ()) -> Int -> Int =
   lam flushOutputs. lam updateInputs. lam delay.
   flushOutputs ();
+  let cpu = getProcessCpuTime () in
   let overrun = delayBy delay in
+  writeCollectionMessage cpu overrun;
   updateInputs ();
-  (match deref collectWriteChannel with Some wc then
-    flushCollectionReport wc overrun
-  else ());
+  readConfigMessages ();
   overrun
 
-let rtpplInferRunner =
-  lam inferId. lam inferModel. lam distToSamples. lam samplesToDist.
-  lam distNormConst.
-  let cpu0 = getProcessCpuTime () in
-  let mono0 = getMonotonicTime () in
-  match
-    switch get (deref inferSpec) inferId
-    case ExecutionBudget {budget = budget, maxParticles = maxParticles} then
-      let model = lam.
-        -- NOTE(larshum, 2023-09-06): For now, we always run a single particle
-        -- at a time when using an execution time budget.
-        let d = inferModel 1 in
-        match distToSamples d with (s, _) in
-        let nc = distNormConst d in
-        (nc, head s)
-      in
-      let deadlineTs = addTimespec mono0 (nanosToTimespec budget) in
-      let samples = rtpplBatchedInference (unsafeCoerce model) deadlineTs in
-      let trimmedParticles = subsequence samples 0 maxParticles in
-      let result = samplesToDist trimmedParticles in
-      (result, length samples)
-    case FixedParticles p then
-      (inferModel p, p)
-    end
-  with (result, nparticles) in
-  (match deref collectWriteChannel with Some _ then
-    let execTime = timespecToNanos (diffTimespec (getProcessCpuTime ()) cpu0) in
-    let str = strJoin " " (map int2string [inferId, nparticles, execTime]) in
-    writeCollectionBuffer str
-  else ());
-  result
+-- NOTE(larshum, 2023-09-07): We use a hard-coded number of particles for all
+-- infers that run outside of the main loop. We assume the task has sufficient
+-- time to run these models within the execution time it is allocated.
+let rtpplFixedInferRunner = lam inferModel.
+  inferModel 100
+
+let rtpplMainInferRunner = lam inferModel.
+  let p = deref particleCount in
+  inferModel p
 
 let openFileDescriptor : String -> Int = lam file.
   rtpplOpenFileDescriptor file
@@ -171,8 +150,14 @@ let openFileDescriptor : String -> Int = lam file.
 let closeFileDescriptor : Int -> () = lam fd.
   rtpplCloseFileDescriptor fd
 
+let rtpplReadInt = lam fd.
+  rtpplReadInt fd
+
 let rtpplReadFloat = lam fd.
   rtpplReadFloat fd
+
+let rtpplReadIntRecord = lam fd. lam nfields.
+  rtpplReadIntRecord nfields fd
 
 let rtpplReadDistFloat = lam fd.
   rtpplReadDistFloat fd
@@ -180,9 +165,17 @@ let rtpplReadDistFloat = lam fd.
 let rtpplReadDistFloatRecord = lam fd. lam nfields.
   rtpplReadDistFloatRecord fd nfields
 
+let rtpplWriteInts =
+  lam fd. lam msgs.
+  iter (lam msg. rtpplWriteInt fd msg) msgs
+
 let rtpplWriteFloats =
   lam fd. lam msgs.
   iter (lam msg. rtpplWriteFloat fd msg) msgs
+
+let rtpplWriteIntRecords =
+  lam fd. lam nfields. lam msgs.
+  iter (lam msg. rtpplWriteIntRecord fd nfields msg) msgs
 
 let rtpplWriteDistFloats =
   lam fd. lam msgs.
@@ -193,54 +186,28 @@ let rtpplWriteDistFloatRecords =
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
 let rtpplReadConfigurationFile = lam taskId.
-  let parseInferSpecification = lam spec.
-    match strSplit " " spec with [mode] ++ rest then
-      switch mode
-      case "0" then
-        match rest with [particlesStr] in
-        FixedParticles (string2int particlesStr)
-      case "1" then
-        match map string2int rest with [execBudget, maxParticles] in
-        ExecutionBudget {budget = execBudget, maxParticles = maxParticles}
-      case _ then error "Invalid inference specification in configuration file"
-      end
-    else
-      error "Invalid inference specification in configuration file"
-  in
   let configFile = join [taskId, ".config"] in
-  let collectFile = join [taskId, ".collect"] in
   if fileExists configFile then
-    let str = readFile configFile in
-    match strSplit "\n" str with [enableCollection] ++ inferSpecifications then
-      let inferSpecs = filter (lam s. not (null s)) inferSpecifications in
-      let spec = map parseInferSpecification inferSpecs in
-      modref inferSpec spec;
+    let str = strTrim (readFile configFile) in
+    match strSplit "\n" str with [enableCollection, nparticles] then
+      modref particleCount (string2int nparticles);
       switch enableCollection
-      case "0" then
-        writeFile collectFile "";
-        modref collectWriteChannel (writeOpen collectFile)
-      case "1" then ()
+      case "0" then ()
+      case "1" then modref collectionModeEnabled true
       case _ then error "Invalid collection flag in configuration file"
       end
     else
       error "Invalid format of configuration file"
   else
-    let msg = join [
-      "A configuration file for task ", taskId, " was not found.\n",
-      "This file can be configured automatically using an assisting program, or ",
-      "specified manually."
-    ] in
+    let msg = concat "Could not find configuration file for task " taskId in
     error msg
-
-let closeCollectChannel = lam.
-  match deref collectWriteChannel with Some ch then writeClose ch else ()
 
 let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.
 
   -- Sets up a signal handler on SIGINT which calls code for closing all file
   -- descriptors before terminating.
-  setSigintHandler (lam. closeFileDescriptors (); closeCollectChannel (); exit 0);
+  setSigintHandler (lam. closeFileDescriptors (); exit 0);
 
   -- Attempt to read the configuration file. If the file is available, the task
   -- uses the provided configuration to guide the choice of execution time
