@@ -5,4 +5,4 @@ hello: hello.rpl
 	rtppl $<
 
 clean:
-	rm -f a a-in1 a-out1 b b-in1 b-out1 network.json
+	rm -f a a-in1 a-out1 a-co* b b-in1 b-out1 b-co* config-task* network.json

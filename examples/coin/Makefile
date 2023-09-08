@@ -5,4 +5,4 @@ cf: coin.rpl
 	rtppl $<
 
 clean:
-	rm -f cf cf-in1 cf-out1 cf.collect network.json
+	rm -f cf cf-in1 cf-out1 cf-co* config-task* network.json
