@@ -89,7 +89,6 @@ let delayBy : Int -> Int = lam delay.
   in
   modref monoLogicalTime waitTime;
   modref wallLogicalTime (addTimespec (deref wallLogicalTime) intervalTime);
-  modref cpuExecutionTime (getProcessCpuTime ());
   rtpplSetPriority oldPriority;
   overrun
 
@@ -103,35 +102,45 @@ let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
   let lt = deref wallLogicalTime in
   (addTimespec lt (nanosToTimespec offset), value)
 
-let writeCollectionMessage = lam cpu1. lam overrun.
+let writeCollectionMessage = lam writeCollectionBuffer. lam cpu. lam overrun.
   if deref collectionModeEnabled then
-    let execTime = timespecToNanos (diffTimespec cpu1 (deref cpuExecutionTime)) in
+    let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
+    modref cpuExecutionTime (getProcessCpuTime ());
     let nparticles = deref particleCount in
-    let msg = tsv 0 (execTime, nparticles, overrun) in
-    modref collectOutputSeq
-      (cons msg (deref collectOutputSeq))
+    writeCollectionBuffer (execTime, nparticles, overrun)
   else ()
 
-let readConfigMessages = lam.
-  -- NOTE(larshum, 2023-09-07): We use the most recently received value as our
-  -- new particle count for inference.
+let readConfigMessages = lam readConfigBuffer.
   if deref collectionModeEnabled then
-    match deref configInputSeq with _ ++ [(_, particles)] then
-      modref particleCount particles
+    match readConfigBuffer with _ ++ [lastMsg] then
+      let particles = value lastMsg in
+      if eqi particles 0 then
+        modref collectionModeEnabled false
+      else
+        modref particleCount particles
     else ()
   else ()
 
--- NOTE(larshum, 2023-04-25): Before the delay, we flush the messages stored in
--- the output buffers. After the delay, we update the contents of the input
--- sequences by reading.
-let sdelay : (() -> ()) -> (() -> ()) -> Int -> Int =
-  lam flushOutputs. lam updateInputs. lam delay.
+-- NOTE(larshum, 2023-09-10): Performs a soft delay of the program. Before the
+-- delay takes place, we flush the output buffers by writing data to output
+-- ports. After the delay, we update the contents of the input sequences by
+-- reading from the input ports.
+--
+-- In addition, if running in collection mode, we
+-- write collected data and read configuration inputs after the delay. We write
+-- after the delay to be able to include the overrun.
+let sdelay =
+  lam flushOutputs : () -> ().
+  lam updateInputs : () -> ().
+  lam writeCollectionBuffer : (Int, Int, Int) -> ().
+  lam readConfigurationBuffer : [TSV Int].
+  lam delay : Int.
   flushOutputs ();
   let cpu = getProcessCpuTime () in
   let overrun = delayBy delay in
-  writeCollectionMessage cpu overrun;
+  writeCollectionMessage writeCollectionBuffer cpu overrun;
   updateInputs ();
-  readConfigMessages ();
+  readConfigMessages readConfigurationBuffer;
   overrun
 
 -- NOTE(larshum, 2023-09-07): We use a hard-coded number of particles for all
@@ -185,6 +194,8 @@ let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
+let defaultParticles = 100
+
 let rtpplReadConfigurationFile = lam taskId.
   let configFile = join [taskId, ".config"] in
   if fileExists configFile then
@@ -199,8 +210,10 @@ let rtpplReadConfigurationFile = lam taskId.
     else
       error "Invalid format of configuration file"
   else
-    let msg = concat "Could not find configuration file for task " taskId in
-    error msg
+    -- NOTE(larshum, 2023-09-08): If we don't find a configuration file, we use
+    -- the below settings as default.
+    modref particleCount defaultParticles;
+    modref collectionModeEnabled true
 
 let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.
