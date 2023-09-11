@@ -110,14 +110,13 @@ let writeCollectionMessage = lam writeCollectionBuffer. lam cpu. lam overrun.
     writeCollectionBuffer (execTime, nparticles, overrun)
   else ()
 
-let readConfigMessages = lam readConfigBuffer.
+let readConfigMessages = lam configBuffer.
   if deref collectionModeEnabled then
-    match readConfigBuffer with _ ++ [lastMsg] then
+    if any (lam msg. eqi (value msg) 0) configBuffer then
+      modref collectionModeEnabled false
+    else match configBuffer with _ ++ [lastMsg] then
       let particles = value lastMsg in
-      if eqi particles 0 then
-        modref collectionModeEnabled false
-      else
-        modref particleCount particles
+      modref particleCount particles
     else ()
   else ()
 
@@ -133,14 +132,14 @@ let sdelay =
   lam flushOutputs : () -> ().
   lam updateInputs : () -> ().
   lam writeCollectionBuffer : (Int, Int, Int) -> ().
-  lam readConfigurationBuffer : [TSV Int].
+  lam configurationBuffer : [TSV Int].
   lam delay : Int.
   flushOutputs ();
   let cpu = getProcessCpuTime () in
   let overrun = delayBy delay in
   writeCollectionMessage writeCollectionBuffer cpu overrun;
   updateInputs ();
-  readConfigMessages readConfigurationBuffer;
+  readConfigMessages configurationBuffer;
   overrun
 
 -- NOTE(larshum, 2023-09-07): We use a hard-coded number of particles for all
@@ -166,7 +165,7 @@ let rtpplReadFloat = lam fd.
   rtpplReadFloat fd
 
 let rtpplReadIntRecord = lam fd. lam nfields.
-  rtpplReadIntRecord nfields fd
+  rtpplReadIntRecord fd nfields
 
 let rtpplReadDistFloat = lam fd.
   rtpplReadDistFloat fd
