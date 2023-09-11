@@ -2,6 +2,7 @@ include "common.mc"
 include "digraph.mc"
 include "json.mc"
 include "name.mc"
+include "string.mc"
 
 include "rtppl-runtime.mc"
 
@@ -19,6 +20,12 @@ let jsonUnwrap = lam o.
 let jsonLookup : String -> Map String JsonValue -> JsonValue =
   lam key. lam kvs.
   jsonUnwrap (mapLookup key kvs)
+
+let parseSystemSpecJson = lam systemSpecFile.
+  let str = readFile systemSpecFile in
+  match jsonParse str with Left json then
+    json
+  else jsonFail ()
 
 let deserializeTasks : JsonValue -> [TaskData] = lam tasks.
   let deserializeTask = lam t.
@@ -58,21 +65,34 @@ let deserializeConnections : JsonValue -> [Connection] = lam connections.
       [] conns
   else jsonFail ()
 
-let constructSystemDependencyGraph = lam systemSpecFile.
-  let str = readFile systemSpecFile in
-  match jsonParse str with Left json then
-    match json with JsonObject kvs then
-      let tasks = deserializeTasks (jsonLookup "tasks" kvs) in
-      let taskNames = map (lam t. t.id) tasks in
-      let g : Digraph String () =
-        digraphAddVertices taskNames (digraphEmpty cmpString (lam. lam. true))
-      in
-      let connections = deserializeConnections (jsonLookup "connections" kvs) in
-      let g = foldl (lam g. lam c. digraphAddEdge c.from c.to () g) g connections in
-      -- NOTE(larshum, 2023-09-08): We explicitly exclude the task itself and
-      -- all connections to and from it, as we are not interested in this node.
-      digraphRemoveVertex configTaskName g
-    else jsonFail ()
+let constructSystemDependencyGraph = lam systemSpecJson.
+  match systemSpecJson with JsonObject kvs then
+    let tasks = deserializeTasks (jsonLookup "tasks" kvs) in
+    let taskNames = map (lam t. t.id) tasks in
+    let g : Digraph String () =
+      digraphAddVertices taskNames (digraphEmpty cmpString (lam. lam. true))
+    in
+    let connections = deserializeConnections (jsonLookup "connections" kvs) in
+    let g = foldl (lam g. lam c. digraphAddEdge c.from c.to () g) g connections in
+    -- NOTE(larshum, 2023-09-08): We explicitly exclude the task itself and
+    -- all connections to and from it, as we are not interested in this node.
+    digraphRemoveVertex configTaskName g
+  else jsonFail ()
+
+-- NOTE(larshum, 2023-09-11): We compute the execution time budgets to allocate
+-- to each task under the assumption that they all execute on the same core.
+let computeTaskExecutionBudgets = lam systemSpecJson.
+  match systemSpecJson with JsonObject kvs then
+    let tasks = deserializeTasks (jsonLookup "tasks" kvs) in
+    let importanceSum = foldl (lam acc. lam t. addi acc t.importance) 0 tasks in
+    let is = int2float importanceSum in
+    mapFromSeq cmpString
+      (map
+        (lam t.
+          let relativeImportance = divf (int2float t.importance) is in
+          let execTime = mulf (int2float t.period) relativeImportance in
+          (t.id, floorfi execTime))
+        tasks)
   else jsonFail ()
 
 type TaskState = {
@@ -80,7 +100,8 @@ type TaskState = {
   outfd : Int,
   particles : Int,
   observations : [(Int, Int, Int)],
-  dependencies : Set String
+  dependencies : Set String,
+  budget : Int
 }
 type ConfigState = {
   active : Set String,
@@ -88,21 +109,28 @@ type ConfigState = {
   tasks : Map String TaskState
 }
 
-let defaultTaskState = lam g. lam taskId.
+let defaultTaskState = lam g. lam execBudgets. lam taskId.
   let inId = join [configTaskName, "-", taskId, ".in"] in
   let outId = join [configTaskName, "-", taskId, ".out"] in
   let infd = openFileDescriptor inId in
   let outfd = openFileDescriptor outId in
-  { infd = infd, outfd = outfd, particles = defaultParticles, observations = []
-  , dependencies = setOfSeq cmpString (digraphPredeccessors taskId g) }
+  match mapLookup taskId execBudgets with Some executionTimeBudget then
+    { infd = infd, outfd = outfd, particles = defaultParticles, observations = []
+    , dependencies = setOfSeq cmpString (digraphPredeccessors taskId g)
+    , budget = executionTimeBudget }
+  else
+    error (concat "Could not find execution time budget for task " taskId)
 
 let configureTask : ConfigState -> String -> (ConfigState, Bool) =
   lam state. lam taskId.
   let taskOverran = lam msgs. any (lam e. neqi e.2 0) msgs in
-  let sufficientObservations = lam obs. geqi (length obs) 5 in
+  let sufficientObservations = lam obs. geqi (length obs) 10 in
+  let maxExecutionTime = lam obs.
+    (optionGetOrElse (lam. never) (max (lam l. lam r. subi l.0 r.0) obs)).0
+  in
   match mapLookup taskId state.tasks with Some task then
     let tsvs : [TSV (Int,Int,Int)] = unsafeCoerce (rtpplReadIntRecord task.infd 3) in
-    let msgs = map value tsvs in
+    let msgs = filter (lam e. eqi e.1 task.particles) (map value tsvs) in
     iter (lam msg. printLn (strJoin " " (map int2string [msg.0, msg.1, msg.2]))) msgs;
     if null msgs then
       (state, false)
@@ -122,10 +150,18 @@ let configureTask : ConfigState -> String -> (ConfigState, Bool) =
         -- TODO(larshum, 2023-09-11): After making at least a sufficient number
         -- of observations, we react by updating the number of particles to use
         -- in the task.
-        rtpplWriteInts task.outfd [(tsv 0 1000), (tsv 0 0)];
-        let task = {task with particles = 1000, observations = []} in
-        let state = {state with tasks = mapInsert taskId task state.tasks} in
-        (state, true)
+        let maxExecTime = maxExecutionTime task.observations in
+        let execRatio = divf (int2float maxExecTime) (int2float task.budget) in
+        if and (gtf execRatio 0.9) (ltf execRatio 1.0) then
+          rtpplWriteInts task.outfd [tsv 0 0];
+          (state, true)
+        else
+          let newParticles = floorfi (divf (int2float task.particles) execRatio) in
+          printLn (join ["Setting new particle count of ", taskId, " to ", int2string newParticles]);
+          rtpplWriteInts task.outfd [tsv 0 newParticles];
+          let task = {task with particles = newParticles, observations = []} in
+          let state = {state with tasks = mapInsert taskId task state.tasks} in
+          (state, false)
       else
         (state, false)
   else
@@ -141,15 +177,38 @@ let tryActivateTask = lam state. lam taskId.
   else
     error (join ["Task ", taskId, " not found in configuration state"])
 
-let configureTasks = lam g. lam tasks.
+let loadExistingConfigurationFiles = lam state.
+  mapFoldWithKey
+    (lam state. lam taskId. lam taskState.
+      match rtpplReadConfigurationFile taskId with Some (enabledCollection, p) then
+        let taskState = {taskState with particles = p} in
+        let state = {state with tasks = mapInsert taskId taskState state.tasks} in
+        if enabledCollection then state
+        else {state with finished = setInsert taskId state.finished}
+      else state)
+    state state.tasks
+
+let printConfigurationCompletionMessage = lam tasks.
+  mapMapWithKey
+    (lam taskId. lam taskState.
+      let p = taskState.particles in
+      printLn (join [taskId, " -> ", int2string p]))
+    tasks;
+  printLn "Completed configuration of all tasks"
+
+let configureTasks = lam g. lam execBudgets. lam tasks.
   recursive let addActiveTasks : ConfigState -> [String] -> (ConfigState, [String]) =
     lam state. lam tasks.
     match tasks with [nextTask] ++ remainingTasks then
-      match tryActivateTask state nextTask with (state, activated) in
-      if activated then
+      if setMem nextTask state.finished then
+        printLn (join ["Skipping configuration of task ", nextTask]);
         addActiveTasks state remainingTasks
       else
-        (state, tasks)
+        match tryActivateTask state nextTask with (state, activated) in
+        if activated then
+          addActiveTasks state remainingTasks
+        else
+          (state, tasks)
     else (state, tasks)
   in
   recursive let work = lam state. lam tasks.
@@ -157,45 +216,44 @@ let configureTasks = lam g. lam tasks.
       state
     else if setIsEmpty state.active then
       match addActiveTasks state tasks with (state, tasks) in
-      if setIsEmpty state.active then
-        error "No tasks could be activated"
-      else
-        work state tasks
+      work state tasks
     else
+      delayBy nanosPerSec;
       let state =
         mapFoldWithKey
           (lam acc. lam taskId. lam.
             match configureTask acc taskId with (acc, finished) in
             if finished then
+              let p =
+                match mapLookup taskId acc.tasks with Some task then
+                  task.particles
+                else
+                  error (concat "Failed to find particles of task " taskId)
+              in
+              let taskConfigFile = concat taskId ".config" in
+              writeFile taskConfigFile (concat "0\n" (int2string p));
               printLn (join ["Finished configuring task ", taskId]);
               {acc with active = setRemove taskId acc.active,
                         finished = setInsert taskId acc.finished}
             else acc)
           state state.active
       in
-      delayBy nanosPerSec;
       work state tasks
   in
   let initialState = {
     active = setEmpty cmpString,
     finished = setEmpty cmpString,
-    tasks = mapFromSeq cmpString (map (lam t. (t, defaultTaskState g t)) tasks)
+    tasks = mapFromSeq cmpString (map (lam t. (t, defaultTaskState g execBudgets t)) tasks)
   } in
-  let finalState = work initialState tasks in
-  -- NOTE(larshum, 2023-09-11): After reaching a final state, where all tasks
-  -- have been configured to use a number of particles for their main infer, we
-  -- write these values to configuration files to have them run as usual
-  -- without collecting data.
-  mapMapWithKey
-    (lam taskId. lam taskState.
-      let p = taskState.particles in
-      let taskConfigFile = concat taskId ".config" in
-      writeFile taskConfigFile (concat "0\n" (int2string p)))
-    finalState.tasks;
-  printLn "Completed configuration of all tasks"
+  let state = loadExistingConfigurationFiles initialState in
+  let finalState = work state tasks in
+  printConfigurationCompletionMessage finalState.tasks
 
 mexpr
 
-let g = constructSystemDependencyGraph "network.json" in
+let systemSpecFile = "network.json" in
+let systemSpecJson = parseSystemSpecJson systemSpecFile in
+let g = constructSystemDependencyGraph systemSpecJson in
+let executionBudgets = computeTaskExecutionBudgets systemSpecJson in
 let vertices = digraphTopologicalOrder g in
-configureTasks g vertices
+configureTasks g executionBudgets vertices

@@ -67,8 +67,6 @@ let cpuExecutionTime : Ref Timespec = ref (0,0)
 
 let collectionModeEnabled : Ref Bool = ref false
 let particleCount : Ref Int = ref 0
-let collectOutputSeq : Ref [(Timespec, (Int, Int, Int))] = ref []
-let configInputSeq : Ref [(Timespec, Int)] = ref []
 
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
@@ -196,23 +194,32 @@ let rtpplWriteDistFloatRecords =
 let defaultParticles = 100
 
 let rtpplReadConfigurationFile = lam taskId.
-  let configFile = join [taskId, ".config"] in
+  let configFile = concat taskId ".config" in
   if fileExists configFile then
     let str = strTrim (readFile configFile) in
     match strSplit "\n" str with [enableCollection, nparticles] then
-      modref particleCount (string2int nparticles);
-      switch enableCollection
-      case "0" then ()
-      case "1" then modref collectionModeEnabled true
-      case _ then error "Invalid collection flag in configuration file"
-      end
+      let ec =
+        switch enableCollection
+        case "0" then false
+        case "1" then true
+        case _ then error "Invalid collection flag in configuration file"
+        end
+      in
+      let p = string2int nparticles in
+      Some (ec, p)
     else
       error "Invalid format of configuration file"
   else
-    -- NOTE(larshum, 2023-09-08): If we don't find a configuration file, we use
-    -- the below settings as default.
-    modref particleCount defaultParticles;
-    modref collectionModeEnabled true
+    None ()
+
+let rtpplSetConfiguration = lam taskId.
+  match
+    optionGetOrElse
+      (lam. (true, defaultParticles))
+      (rtpplReadConfigurationFile taskId)
+  with (enableCollection, nparticles) in
+  modref collectionModeEnabled enableCollection;
+  modref particleCount nparticles
 
 let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.
@@ -221,10 +228,7 @@ let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) ->
   -- descriptors before terminating.
   setSigintHandler (lam. closeFileDescriptors (); exit 0);
 
-  -- Attempt to read the configuration file. If the file is available, the task
-  -- uses the provided configuration to guide the choice of execution time
-  -- budgets for infers. Otherwise, the task executes in collection mode.
-  rtpplReadConfigurationFile taskId;
+  rtpplSetConfiguration taskId;
 
   -- Initialize the logical time to the current time of the physical clock
   modref monoLogicalTime (getMonotonicTime ());
