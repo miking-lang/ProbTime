@@ -110,12 +110,13 @@ let writeCollectionMessage = lam writeCollectionBuffer. lam cpu. lam overrun.
 
 let readConfigMessages = lam configBuffer.
   if deref collectionModeEnabled then
-    if any (lam msg. eqi (value msg) 0) configBuffer then
-      modref collectionModeEnabled false
-    else match configBuffer with _ ++ [lastMsg] then
-      let particles = value lastMsg in
-      modref particleCount particles
-    else ()
+    let cmpTsv = lam l. lam r. cmpTimespec l.0 r.0 in
+    let particles = map value (sort cmpTsv configBuffer) in
+    iter
+      (lam p.
+        if eqi p 0 then modref collectionModeEnabled false
+        else modref particleCount p)
+      particles
   else ()
 
 -- NOTE(larshum, 2023-09-10): Performs a soft delay of the program. Before the
