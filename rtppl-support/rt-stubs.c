@@ -1,6 +1,7 @@
 #include <caml/alloc.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
+#include <caml/signals.h>
 
 #include "shared.h"
 
@@ -42,6 +43,7 @@ void clock_nanosleep_stub(value t) {
   struct timespec ts;
   ts.tv_sec = Long_val(Field(t, 0));
   ts.tv_nsec = Long_val(Field(t, 1));
+  caml_process_pending_actions();
   clock_nanosleep_abstime(&ts);
   CAMLreturn0;
 }
