@@ -100,6 +100,9 @@ type TaskState = {
   outfd : Int,
   particles : Int,
   observations : [(Int, Int, Int)],
+  wcets : [(Int, Int)],
+  baseExecutionTime : Option Int,
+  particlesUpperBound : Int,
   dependencies : Set String,
   budget : Int
 }
@@ -115,55 +118,94 @@ let defaultTaskState = lam g. lam execBudgets. lam taskId.
   let infd = openFileDescriptor inId in
   let outfd = openFileDescriptor outId in
   match mapLookup taskId execBudgets with Some executionTimeBudget then
-    { infd = infd, outfd = outfd, particles = defaultParticles, observations = []
+    { infd = infd, outfd = outfd, particles = defaultParticles
+    , observations = [], wcets = [], baseExecutionTime = None ()
+    , particlesUpperBound = 7500
     , dependencies = setOfSeq cmpString (digraphPredeccessors taskId g)
     , budget = executionTimeBudget }
   else
     error (concat "Could not find execution time budget for task " taskId)
 
+let cmpFloat : Float -> Float -> Int = lam l. lam r.
+  if gtf l r then 1 else if eqf l r then 0 else negi 1
+
+let setTaskParticles : TaskState -> Int -> TaskState = lam task. lam particles.
+  rtpplWriteInts task.outfd [tsv 0 particles];
+  {task with particles = particles, observations = []}
+
+let maxExecutionTime = lam msgs.
+  let execTimes = map (lam e. e.0) msgs in
+  if null execTimes then 0
+  else
+    match max subi execTimes with Some wcet in
+    wcet
+
+let updateTaskObservations = lam state.
+  let tasks =
+    mapMapWithKey
+      (lam taskId. lam task.
+        let tsvs : [TSV (Int, Int, Int)] = unsafeCoerce (rtpplReadIntRecord task.infd 3) in
+        let msgs = filter (lam e. eqi e.1 task.particles) (map value tsvs) in
+        let maxExec = maxExecutionTime msgs in
+        if gti maxExec task.budget then
+          -- NOTE(larshum, 2023-09-13): In case the task overran, we
+          -- immediately reduce the number of particles relative to the amount
+          -- of overrun.
+          let overrunRate = divf (int2float maxExec) (int2float task.budget) in
+          let newParticles = floorfi (divf (int2float task.particles) overrunRate) in
+          printLn (join ["Lowering particles of task ", taskId, " to ", int2string newParticles]);
+          let task = setTaskParticles task newParticles in
+          {task with particlesUpperBound = newParticles}
+        else if any (lam e. gti e.2 0) msgs then
+          -- sdelay overran - is this fatal?
+          printLn (join ["Task ", taskId, " overran its period"]);
+          let newParticles = 1 in
+          setTaskParticles task newParticles
+        else
+          {task with observations = concat task.observations msgs})
+      state.tasks
+  in
+  {state with tasks = tasks}
+
 let configureTask : ConfigState -> String -> (ConfigState, Bool) =
   lam state. lam taskId.
-  let taskOverran = lam msgs. any (lam e. neqi e.2 0) msgs in
   let sufficientObservations = lam obs. geqi (length obs) 10 in
-  let maxExecutionTime = lam obs.
-    (optionGetOrElse (lam. never) (max (lam l. lam r. subi l.0 r.0) obs)).0
+  let minExecutionTime = lam msgs.
+    match max (lam l. lam r. subi r.0 l.0) msgs with Some (met, _, _) in
+    met
   in
   match mapLookup taskId state.tasks with Some task then
-    let tsvs : [TSV (Int,Int,Int)] = unsafeCoerce (rtpplReadIntRecord task.infd 3) in
-    let msgs = filter (lam e. eqi e.1 task.particles) (map value tsvs) in
-    iter (lam msg. printLn (strJoin " " (map int2string [msg.0, msg.1, msg.2]))) msgs;
-    if null msgs then
-      (state, false)
-    else if taskOverran msgs then
-      -- TODO(larshum, 2023-09-11): In case the task overran any of its
-      -- executions, we take appropriate action by decreasing its particle
-      -- count.
-      let newParticles = divi task.particles 2 in
-      rtpplWriteInts task.outfd [(tsv 0 newParticles)];
-      let task = {task with particles = newParticles, observations = []} in
-      let state = {state with tasks = mapInsert taskId task state.tasks} in
-      (state, false)
-    else
-      let task = {task with observations = concat task.observations msgs} in
-      let state = {state with tasks = mapInsert taskId task state.tasks} in
-      if sufficientObservations task.observations then
-        -- TODO(larshum, 2023-09-11): After making at least a sufficient number
-        -- of observations, we react by updating the number of particles to use
-        -- in the task.
-        let maxExecTime = maxExecutionTime task.observations in
-        let execRatio = divf (int2float maxExecTime) (int2float task.budget) in
-        if and (gtf execRatio 0.9) (ltf execRatio 1.0) then
-          rtpplWriteInts task.outfd [tsv 0 0];
-          (state, true)
+    let wcet = maxExecutionTime task.observations in
+    if sufficientObservations task.observations then
+      let task = {task with wcets = snoc task.wcets (task.particles, wcet)} in
+      -- NOTE(larshum, 2023-09-13): We use the best case execution time of the
+      -- initial task as our assumption of the "base" execution time, which
+      -- represents the mandatory part that is independent on the number of
+      -- particles used in inference.
+      let baseExecutionTime =
+        match task.baseExecutionTime with Some bt then
+          bt
         else
-          let newParticles = floorfi (divf (int2float task.particles) execRatio) in
-          printLn (join ["Setting new particle count of ", taskId, " to ", int2string newParticles]);
-          rtpplWriteInts task.outfd [tsv 0 newParticles];
-          let task = {task with particles = newParticles, observations = []} in
-          let state = {state with tasks = mapInsert taskId task state.tasks} in
-          (state, false)
+          minExecutionTime task.observations
+      in
+      let task = {task with baseExecutionTime = Some baseExecutionTime} in
+      let maxWcetPerParticle =
+        divf (int2float (subi wcet baseExecutionTime)) (int2float task.particles)
+      in
+      let targetParticles = floorfi (mulf (divf (int2float task.budget) maxWcetPerParticle) 0.75) in
+      let newParticles = mini targetParticles task.particlesUpperBound in
+      if leqi newParticles task.particles then
+        printLn (join ["Fixing particle count of ", taskId, " to ", int2string task.particles]);
+        let state = {state with tasks = mapInsert taskId task state.tasks} in
+        rtpplWriteInts task.outfd [tsv 0 0];
+        (state, true)
       else
+        let task = setTaskParticles task newParticles in
+        printLn (join ["Increasing particle count of ", taskId, " to ", int2string task.particles]);
+        let state = {state with tasks = mapInsert taskId task state.tasks} in
         (state, false)
+    else
+      (state, false)
   else
     error (join ["Task ", taskId, " not found in configuration state"])
 
@@ -171,7 +213,9 @@ let tryActivateTask = lam state. lam taskId.
   match mapLookup taskId state.tasks with Some task then
     if setIsEmpty (setSubtract task.dependencies state.finished) then
       printLn (join ["Activating configuration of task ", taskId]);
-      ({state with active = setInsert taskId state.active}, true)
+      let task = {task with observations = []} in
+      let tasks = mapInsert taskId task state.tasks in
+      ({state with active = setInsert taskId state.active, tasks = tasks}, true)
     else
       (state, false)
   else
@@ -219,6 +263,7 @@ let configureTasks = lam g. lam execBudgets. lam tasks.
       work state tasks
     else
       delayBy nanosPerSec;
+      let state = updateTaskObservations state in
       let state =
         mapFoldWithKey
           (lam acc. lam taskId. lam.
