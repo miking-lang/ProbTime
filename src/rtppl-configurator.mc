@@ -236,7 +236,8 @@ let printConfigurationCompletionMessage = lam tasks.
   mapMapWithKey
     (lam taskId. lam taskState.
       let p = taskState.particles in
-      printLn (join [taskId, " -> ", int2string p]))
+      printLn (join [ taskId, " -> particles: ", int2string taskState.particles
+                    , ", budget: ", int2string taskState.budget ]))
     tasks;
   printLn "Completed configuration of all tasks"
 

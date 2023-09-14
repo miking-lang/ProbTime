@@ -100,12 +100,18 @@ let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
   let lt = deref wallLogicalTime in
   (addTimespec lt (nanosToTimespec offset), value)
 
-let writeCollectionMessage = lam writeCollectionBuffer. lam cpu. lam overrun.
-  if deref collectionModeEnabled then
+let writeCollectionMessage = lam debugMode. lam writeCollectionBuffer. lam cpu. lam overrun.
+  if or (deref collectionModeEnabled) debugMode then
     let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
     modref cpuExecutionTime (getProcessCpuTime ());
     let nparticles = deref particleCount in
-    writeCollectionBuffer (execTime, nparticles, overrun)
+    if deref collectionModeEnabled then
+      writeCollectionBuffer (execTime, nparticles, overrun)
+    else ();
+    if debugMode then
+      printLn (join [ "execution time: ", int2string execTime
+                    , " overrun: ", int2string overrun ])
+    else ()
   else ()
 
 let readConfigMessages = lam configBuffer.
@@ -132,11 +138,12 @@ let sdelay =
   lam updateInputs : () -> ().
   lam writeCollectionBuffer : (Int, Int, Int) -> ().
   lam configurationBuffer : [TSV Int].
+  lam debugMode : Bool.
   lam delay : Int.
   flushOutputs ();
   let cpu = getProcessCpuTime () in
   let overrun = delayBy delay in
-  writeCollectionMessage writeCollectionBuffer cpu overrun;
+  writeCollectionMessage debugMode writeCollectionBuffer cpu overrun;
   updateInputs ();
   readConfigMessages configurationBuffer;
   overrun

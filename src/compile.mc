@@ -1278,8 +1278,8 @@ lang RtpplCompile =
     let sdelayId = rtIds.sdelay in
     let liftedArgs = getCapturedTopLevelVars env sdelayId in
     let sdelayFun = appSeq_ (_var info sdelayId) liftedArgs in
-    let printTime = TmConst {
-      val = CBool {val = env.options.printSdelayTime},
+    let debugModeExpr = TmConst {
+      val = CBool {val = env.options.debugMode},
       ty = _tyuk info, info = info
     } in
     -- NOTE(larshum, 2023-09-10): During an sdelay, we collect data about the
@@ -1302,11 +1302,13 @@ lang RtpplCompile =
         lhs = TmApp {
           lhs = TmApp {
             lhs = TmApp {
-              lhs = sdelayFun, rhs = _var info flushOutputsId,
-              ty = _tyuk info, info = info},
-            rhs = _var info updateInputsId, ty = _tyuk info, info = info},
-          rhs = writeCollectionBufferExpr, ty = _tyuk info, info = info},
-        rhs = readConfigBufferExpr, ty = _tyuk info, info = info},
+              lhs = TmApp {
+                lhs = sdelayFun, rhs = _var info flushOutputsId,
+                ty = _tyuk info, info = info},
+              rhs = _var info updateInputsId, ty = _tyuk info, info = info},
+            rhs = writeCollectionBufferExpr, ty = _tyuk info, info = info},
+          rhs = readConfigBufferExpr, ty = _tyuk info, info = info},
+        rhs = debugModeExpr, ty = _tyuk info, info = info},
       rhs = e, ty = _tyuk info, info = info}
   | t -> smap_Expr_Expr (specializeRtpplExprs env taskId) t
 
