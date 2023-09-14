@@ -250,6 +250,7 @@ let addInt = addi
 let subInt = subi
 let mulInt = muli
 let divInt = divi
+let remInt = modi
 let negInt = subi 0
 let ltInt = lti
 let gtInt = gti
