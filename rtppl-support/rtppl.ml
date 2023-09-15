@@ -37,32 +37,3 @@ external read_dist_float_record
 external write_dist_float_record
   : int -> int -> (opaque array * float array) tsv -> unit
   = "rtppl_write_dist_float_record_stub"
-
-external rtppl_batched_inference_stub
-  : (opaque list -> opaque list) -> timespec -> opaque list
-  = "rtppl_batched_inference_stub"
-
-exception Rtppl_batched_infer_timeout
-
-let rtppl_batched_inference infer_model deadline =
-  let f _ = raise Rtppl_batched_infer_timeout in
-  Sys.set_signal Sys.sigusr1 (Sys.Signal_handle f);
-  let model _ =
-    let acc = Atomic.make [] in
-    let rec work _ =
-      let upd = infer_model () :: Atomic.get acc in
-      Atomic.set acc upd;
-      work ()
-    in
-    (* NOTE(larshum, 2023-05-01): We have to catch all exceptions rather than
-       just the exception we raise because the exception we raise may be
-       captured by called code (and hopefully re-thrown). *)
-    (try
-      work ()
-    with _ ->
-      ());
-    match Atomic.get acc with
-    | [] -> failwith "Batched inference failed to produce any batches on time"
-    | result -> result
-  in
-  rtppl_batched_inference_stub model deadline
