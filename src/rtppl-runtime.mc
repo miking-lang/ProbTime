@@ -105,9 +105,9 @@ let writeCollectionMessage = lam debugMode. lam writeCollectionBuffer. lam cpu. 
     let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
     modref cpuExecutionTime (getProcessCpuTime ());
     let nparticles = deref particleCount in
-    if deref collectionModeEnabled then
+    (if deref collectionModeEnabled then
       writeCollectionBuffer (execTime, nparticles, overrun)
-    else ();
+    else ());
     if debugMode then
       printLn (join [ "execution time: ", int2string execTime
                     , " overrun: ", int2string overrun ])
