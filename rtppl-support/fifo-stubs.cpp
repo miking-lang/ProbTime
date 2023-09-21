@@ -3,13 +3,25 @@
 #include <caml/mlvalues.h>
 #include <caml/signals.h>
 
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
 #include <iostream>
+#include <map>
 #include <vector>
+
+struct file_buffer {
+  char *start;
+  char *pos;
+  int64_t sz;
+};
+
+const int64_t BUFFER_SIZE = 1<<20;
+
+std::map<int, file_buffer> buffers;
 
 struct payload {
   char *data;
@@ -21,35 +33,26 @@ int min(int a, int b) {
   return b;
 }
 
-int64_t read_message_size(int fd) {
-  char buffer[sizeof(int64_t)];
-  int64_t count = 0;
-  while (count < sizeof(int64_t)) {
-    int bytes = read(fd, (void*)&buffer[count], sizeof(int64_t)-count);
-    if (bytes <= 0) {
-      return -1;
-    }
-    count += bytes;
-  }
-  int64_t sz;
-  memcpy((void*)&sz, buffer, sizeof(int64_t));
-  return sz;
-}
-
-bool read_message(int fd, payload& p) {
-  p.size = read_message_size(fd);
+bool read_message(file_buffer& b, payload& p) {
+  p.size = *(int64_t*)b.pos;
   if (p.size <= 0) {
     return false;
   }
+  memset(b.pos, 0, sizeof(int64_t));
+  b.pos += sizeof(int64_t);
   p.data = (char*)malloc(p.size);
   int64_t count = 0;
-  while (count < p.size) {
-    int bytes_read = read(fd, (void*)&p.data[count], p.size - count);
-    if (bytes_read == -1) {
-      fprintf(stderr, "Error reading message: %s\n", strerror(errno));
-      exit(1);
-    }
-    count += bytes_read;
+  if (b.pos + p.size > b.start + b.sz) {
+    int64_t n = b.sz - (b.pos - b.start);
+    memcpy(p.data, b.pos, n);
+    memset(b.pos, 0, n);
+    memcpy(p.data + n, b.start, p.size - n);
+    memset(b.start, 0, p.size - n);
+    b.pos = b.start + p.size - n;
+  } else {
+    memcpy(p.data, b.pos, p.size);
+    memset(b.pos, 0, p.size);
+    b.pos += p.size;
   }
   return true;
 }
@@ -57,38 +60,33 @@ bool read_message(int fd, payload& p) {
 std::vector<payload> read_messages(int fd) {
   std::vector<payload> input_seq;
   payload p;
-  while (read_message(fd, p)) {
+  file_buffer& b = buffers[fd];
+  while (read_message(b, p)) {
     input_seq.emplace_back(p);
   }
   return input_seq;
 }
 
-void write_message_size(int fd, int64_t sz) {
-  char buffer[sizeof(int64_t)];
-  memcpy((void*)buffer, (void*)&sz, sizeof(int64_t));
-  int64_t count = 0;
-  while (count < sizeof(int64_t)) {
-    int bytes = write(fd, (void*)&buffer[count], sizeof(int64_t)-count);
-    if (bytes == -1) {
-      fprintf(stderr, "Error writing message: %s\n", strerror(errno));
-      exit(1);
-    }
-    count += bytes;
-  }
-}
-
 void write_message(int fd, const payload& p) {
-  write_message_size(fd, p.size);
-  int64_t count = 0;
-  while (count < p.size) {
-    int bytes_written = write(fd, (void*)&p.data[count], p.size - count);
-    if (bytes_written == -1) {
-      fprintf(stderr, "Error writing message: %s\n", strerror(errno));
-      exit(1);
-    }
-    count += bytes_written;
+  file_buffer& b = buffers[fd];
+  int64_t *sz_ptr = (int64_t*)b.pos;
+  b.pos += sizeof(int64_t);
+  if (b.pos + p.size > b.start + b.sz) {
+    int64_t n = b.sz - (b.pos - b.start);
+    memcpy(b.pos, p.data, n);
+    memcpy(b.start, p.data + n, p.size - n);
+    b.pos = b.start + p.size - n;
+  } else {
+    memcpy(b.pos, p.data, p.size);
+    b.pos += p.size;
   }
-  fsync(fd);
+  // NOTE(larshum, 2023-09-21): We write the size last to ensure it is
+  // synchronized with the rest of the data we write.
+  memcpy(sz_ptr, (int64_t*)&p.size, sizeof(int64_t));
+  if (msync(b.start, b.sz, MS_ASYNC) == -1) {
+    fprintf(stderr, "Syncing memory buffer failed: %s\n", strerror(errno));
+    exit(1);
+  }
 }
 
 inline value to_timespec_value(int64_t ts) {
@@ -116,12 +114,28 @@ extern "C" {
       fprintf(stderr, "Could not open file %s: %s\n", filename, strerror(errno));
       exit(1);
     }
+    if (ftruncate(fd, BUFFER_SIZE) == -1) {
+      fprintf(stderr, "Error while creating memory buffer for file %s: %s\n", filename, strerror(errno));
+      exit(1);
+    }
+    void *ptr = mmap(NULL, BUFFER_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ptr == (void*)-1) {
+      fprintf(stderr, "Error while mapping file %s to memory: %s\n", filename, strerror(errno));
+      exit(1);
+    }
+    file_buffer buf;
+    buf.start = (char*)ptr;
+    buf.pos = (char*)ptr;
+    buf.sz = BUFFER_SIZE;
+    buffers[fd] = buf;
     CAMLreturn(Val_int(fd));
   }
 
   void close_file_descriptor_stub(value fd) {
     CAMLparam1(fd);
     close(Int_val(fd));
+    munmap(buffers[fd].start, buffers[fd].sz);
+    buffers.erase(fd);
     CAMLreturn0;
   }
 
