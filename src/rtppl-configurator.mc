@@ -214,7 +214,7 @@ let configureTask : ConfigState -> String -> (ConfigState, Bool) =
             -- unused part of the execution time budget.
             let addedParticles = floorfi (divf (int2float (subi task.budget wcet)) maxWcetPerParticle) in
             let newParticles = mini (addi task.particles addedParticles) task.particlesUpperBound in
-            if leqi addedParticles 0 then
+            if or (leqi addedParticles 0) (eqi newParticles task.particlesUpperBound) then
               (task, true)
             else
               printLn (join ["Increasing particle count of ", taskId, " from ", int2string task.particles, " to ", int2string newParticles]);
@@ -225,11 +225,14 @@ let configureTask : ConfigState -> String -> (ConfigState, Bool) =
             -- (or beyond) its allocated budget, we decrease the number of
             -- particles.
             let removedParticles = floorfi (divf (mulf (int2float task.budget) 0.1) maxWcetPerParticle) in
-            let newParticles = subi task.particles removedParticles in
-            printLn (join ["Reducing particle count of ", taskId, " from ", int2string task.particles, " to ", int2string newParticles]);
-            let task = {task with particlesUpperBound = task.particles} in
-            let task = setTaskParticles task newParticles in
-            (task, false)
+            if eqi removedParticles 0 then
+              (task, true)
+            else
+              let newParticles = subi task.particles removedParticles in
+              printLn (join ["Reducing particle count of ", taskId, " from ", int2string task.particles, " to ", int2string newParticles]);
+              let task = {task with particlesUpperBound = task.particles} in
+              let task = setTaskParticles task newParticles in
+              (task, false)
           else
             (task, true)
       with (task, finished) in
