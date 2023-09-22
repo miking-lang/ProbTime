@@ -2,16 +2,13 @@ include "common.mc"
 include "math.mc"
 include "set.mc"
 
-type TaskData = {
-  period : Int,
-  execTime : Int
-}
+include "definitions.mc"
 
 let getPeriod = lam tasks. lam i.
   (get tasks i).period
 
 let getExecTime = lam tasks. lam i.
-  (get tasks i).execTime
+  (get tasks i).budget
 
 let schedulingPoints = lam tasks. lam i.
   recursive let work = lam i. lam t.
@@ -23,7 +20,7 @@ let schedulingPoints = lam tasks. lam i.
           (muli (floorfi (divf (int2float t) (int2float periodi))) periodi))
         (work (subi i 1) t)
   in
-  let periodi = (get tasks i).period in
+  let periodi = getPeriod tasks i in
   setToSeq (work (subi i 1) periodi)
 
 let schedulable : [TaskData] -> Bool = lam tasks.
@@ -59,7 +56,8 @@ let dotProduct = lam lhs. lam rhs.
     0
     (zip lhs rhs)
 
-let maxAlteration : [TaskData] -> [Int] -> Float = lam tasks. lam d.
+let computeLambda : [TaskData] -> Float = lam tasks.
+  let d = map (lam t. t.importance) tasks in
   let n = length tasks in
   let values =
     create n
@@ -91,25 +89,31 @@ mexpr
 let tasks = [] in
 utest schedulable tasks with true in
 
-let tasks = [{period = 100, execTime = 50}, {period = 100, execTime = 50}] in
+let tasks = [
+  {defaultTaskData with period = 100, budget = 50},
+  {defaultTaskData with period = 100, budget = 50}
+] in
 utest schedulingPoints tasks 0 with [100] in
 utest schedulingPoints tasks 1 with [100] in
 utest schedulable tasks with true in
-utest maxAlteration tasks [1,1] with 0.0 using eqfApprox 1e-6 in
-
-let tasks = [{period = 100, execTime = 50}, {period = 100, execTime = 51}] in
-utest schedulable tasks with false in
-utest maxAlteration tasks [1,1] with 0.0 using ltf in
+utest computeLambda tasks with 0.0 using eqfApprox 1e-6 in
 
 let tasks = [
-  {period = 300, execTime = 10},
-  {period = 350, execTime = 10},
-  {period = 1000, execTime = 900}
+  {defaultTaskData with period = 100, budget = 50},
+  {defaultTaskData with period = 100, budget = 51}
+] in
+utest schedulable tasks with false in
+utest computeLambda tasks with 0.0 using ltf in
+
+let tasks = [
+  {defaultTaskData with period = 300, budget = 10},
+  {defaultTaskData with period = 350, budget = 10},
+  {defaultTaskData with period = 1000, budget = 900}
 ] in
 utest schedulingPoints tasks 0 with [300] in
 utest schedulingPoints tasks 1 with [300, 350] in
 utest schedulingPoints tasks 2 with [600, 700, 900, 1000] in
 utest schedulable tasks with true in
-utest maxAlteration tasks [1,1,1] with 0.0 using gtf in
+utest computeLambda tasks with 0.0 using gtf in
 
 ()
