@@ -24,10 +24,6 @@ let updateInputsId = nameSym "updateInputs"
 let outputSeqsId = nameSym "outputSeqs"
 let flushOutputsId = nameSym "flushOutputs"
 
-let configInPortId = "config.in"
-let configOutPortId = "collect.out"
-let configTaskId = nameSym "config.task"
-
 let runtimeRef = ref (None ())
 let rtIdRef = ref (None ())
 
@@ -1194,16 +1190,6 @@ lang RtpplCompile =
     connections : [(String, String)]
   }
 
-  sem taskCollectionInputPortId : Name -> String
-  sem taskCollectionInputPortId =
-  | taskId ->
-    join [nameGetStr taskId, "-", configInPortId]
-
-  sem taskCollectionOutputPortId : Name -> String
-  sem taskCollectionOutputPortId =
-  | taskId ->
-    join [nameGetStr taskId, "-", configOutPortId]
-
   sem toPortData : RtpplPort -> PortData
   sem toPortData =
   | InputRtpplPort {id = {v = id}, ty = ty} ->
@@ -1278,37 +1264,12 @@ lang RtpplCompile =
     let sdelayId = rtIds.sdelay in
     let liftedArgs = getCapturedTopLevelVars env sdelayId in
     let sdelayFun = appSeq_ (_var info sdelayId) liftedArgs in
-    let debugModeExpr = TmConst {
-      val = CBool {val = env.options.debugMode},
-      ty = _tyuk info, info = info
-    } in
-    -- NOTE(larshum, 2023-09-10): During an sdelay, we collect data about the
-    -- execution and update the particles based on configuration input, if
-    -- executing in collection mode.
-    let writeCollectionBufferExpr = TmLam {
-      ident = nameNoSym "msg", tyAnnot = _tyuk info, tyParam = _tyuk info,
-      body = specializeRtpplExprs env taskId
-        (TmWrite {portId = configOutPortId, src = _unsafe (_var info (nameNoSym "msg")),
-                  delay = TmConst {val = CInt {val = 0}, ty = _tyuk info, info = info},
-                  ty = _tyuk info, info = info}),
-      ty = _tyuk info, info = info
-    } in
-    let readConfigBufferExpr =
-      specializeRtpplExprs env taskId
-        (TmRead {portId = configInPortId, ty = _tyuk info, info = info})
-    in
     TmApp {
       lhs = TmApp {
         lhs = TmApp {
-          lhs = TmApp {
-            lhs = TmApp {
-              lhs = TmApp {
-                lhs = sdelayFun, rhs = _var info flushOutputsId,
-                ty = _tyuk info, info = info},
-              rhs = _var info updateInputsId, ty = _tyuk info, info = info},
-            rhs = writeCollectionBufferExpr, ty = _tyuk info, info = info},
-          rhs = readConfigBufferExpr, ty = _tyuk info, info = info},
-        rhs = debugModeExpr, ty = _tyuk info, info = info},
+          lhs = sdelayFun, rhs = _var info flushOutputsId,
+          ty = _tyuk info, info = info},
+        rhs = _var info updateInputsId, ty = _tyuk info, info = info},
       rhs = e, ty = _tyuk info, info = info}
   | t -> smap_Expr_Expr (specializeRtpplExprs env taskId) t
 
@@ -1379,34 +1340,6 @@ lang RtpplCompile =
   | t ->
     sfold_Expr_Expr identifiersInExpr acc t
 
-  sem addConfigurationTask : CompileResult -> CompileResult
-  sem addConfigurationTask =
-  | result ->
-    let result =
-      mapFoldWithKey
-        (lam result. lam taskId. lam.
-          let taskInPort = taskCollectionInputPortId taskId in
-          let taskOutPort = taskCollectionOutputPortId taskId in
-          let configInPort = join [nameGetStr configTaskId, "-", nameGetStr taskId, ".in"] in
-          let configOutPort = join [nameGetStr configTaskId, "-", nameGetStr taskId, ".out"] in
-          let ports =
-            concat result.ports
-              [taskInPort, taskOutPort, configInPort, configOutPort]
-          in
-          let connIn = (configOutPort, taskInPort) in
-          let connOut = (taskOutPort, configInPort) in
-          let connections = concat result.connections [connIn, connOut] in
-          {result with connections = connections, ports = ports})
-        result
-        result.tasks
-    in
-    let configTaskPath = concat rtpplSrcLoc "rtppl-configurator.mc" in
-    let configTaskBody =
-      parseMCoreFile defaultBootParserParseMCoreFileArg configTaskPath
-    in
-    let configTaskBody = stripUtests (symbolize configTaskBody) in
-    {result with tasks = mapInsert configTaskId configTaskBody result.tasks}
-
   sem portSpecToString : RtpplPortSpec -> String
   sem portSpecToString =
   | PortSpecRtpplPortSpec {port = {v = portId}, id = Some {v = taskId}} ->
@@ -1427,8 +1360,7 @@ lang RtpplCompile =
       tasks = mapEmpty nameCmp, ports = [], connections = []
     } in
     let result = foldl (compileTask env) emptyResult tasks in
-    let result = foldl addConnectionToResult result connections in
-    addConfigurationTask result
+    foldl addConnectionToResult result connections
 
   sem collectPortsPerTop : Map Name [PortData] -> RtpplTop -> Map Name [PortData]
   sem collectPortsPerTop portMap =
@@ -1439,31 +1371,7 @@ lang RtpplCompile =
 
   sem collectPorts : [RtpplTop] -> Map Name [PortData]
   sem collectPorts =
-  | tops ->
-    let addImplicitPorts = lam id. lam ports.
-      -- NOTE(larshum, 2023-09-07): We add implicit input and output ports
-      -- to each task template. These are used to communicate with a
-      -- coordinating task, which configures the number of particles to use in
-      -- inference for all (other) tasks.
-      let info = NoInfo () in
-      let configInputPort = {
-        id = configInPortId, isInput = true,
-        ty = IntRtpplType {info = info}
-      } in
-      let collectOutputPort = {
-        id = configOutPortId, isInput = false,
-        ty = RecordRtpplType {
-          fields = [
-            {id = {i = info, v = "0"}, ty = IntRtpplType {info = info}},
-            {id = {i = info, v = "1"}, ty = IntRtpplType {info = info}},
-            {id = {i = info, v = "2"}, ty = IntRtpplType {info = info}}],
-          info = info
-        }
-      } in
-      concat ports [configInputPort, collectOutputPort]
-    in
-    let portMap = foldl collectPortsPerTop (mapEmpty nameCmp) tops in
-    mapMapWithKey addImplicitPorts portMap
+  | tops -> foldl collectPortsPerTop (mapEmpty nameCmp) tops
 
   sem collectConstants : Map Name RtpplExpr -> RtpplTop -> Map Name RtpplExpr
   sem collectConstants consts =

@@ -41,8 +41,7 @@ bool read_message(file_buffer& b, payload& p) {
   memset(b.pos, 0, sizeof(int64_t));
   b.pos += sizeof(int64_t);
   p.data = (char*)malloc(p.size);
-  int64_t count = 0;
-  if (b.pos + p.size > b.start + b.sz) {
+  if (b.pos + p.size >= b.start + b.sz) {
     int64_t n = b.sz - (b.pos - b.start);
     memcpy(p.data, b.pos, n);
     memset(b.pos, 0, n);
@@ -71,7 +70,7 @@ void write_message(int fd, const payload& p) {
   file_buffer& b = buffers[fd];
   int64_t *sz_ptr = (int64_t*)b.pos;
   b.pos += sizeof(int64_t);
-  if (b.pos + p.size > b.start + b.sz) {
+  if (b.pos + p.size >= b.start + b.sz) {
     int64_t n = b.sz - (b.pos - b.start);
     memcpy(b.pos, p.data, n);
     memcpy(b.start, p.data + n, p.size - n);

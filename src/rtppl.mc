@@ -76,19 +76,13 @@ lang RtpplJson = RtpplAst + RtpplTaskData
     ] in
     JsonObject (mapFromSeq cmpString topMappings)
 
-  sem addConfigurationTaskData : Map Name TaskData -> Map Name TaskData
-  sem addConfigurationTaskData =
-  | acc ->
-    let configTaskData = {period = 0, priority = 0} in
-    mapInsert configTaskId configTaskData acc
-
   sem generateJsonNetworkSpecification : RtpplOptions -> [(String, String)]
                                       -> RtpplProgram -> ()
   sem generateJsonNetworkSpecification options connections =
   | prog & (ProgramRtpplProgram {main = MainRtpplMain {ext = ext}}) ->
     let names = {sensors = [], actuators = []} in
     let names = foldl collectSensorOrActuatorName names ext in
-    let taskData = addConfigurationTaskData (collectProgramTaskData prog) in
+    let taskData = collectProgramTaskData prog in
     let json = makeJsonSpecification names taskData connections in
     let path = optJoinPath options.outputPath "network.json" in
     writeFile path (json2string json)

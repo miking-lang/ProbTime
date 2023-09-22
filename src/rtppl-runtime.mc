@@ -65,8 +65,8 @@ let monoLogicalTime : Ref Timespec = ref (0,0)
 let wallLogicalTime : Ref Timespec = ref (0,0)
 let cpuExecutionTime : Ref Timespec = ref (0,0)
 
-let collectionModeEnabled : Ref Bool = ref false
 let particleCount : Ref Int = ref 0
+let collectBuffer : Ref [(Int, Int)] = ref []
 
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
@@ -100,30 +100,10 @@ let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
   let lt = deref wallLogicalTime in
   (addTimespec lt (nanosToTimespec offset), value)
 
-let writeCollectionMessage = lam debugMode. lam writeCollectionBuffer. lam cpu. lam overrun.
-  if or (deref collectionModeEnabled) debugMode then
-    let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
-    modref cpuExecutionTime (getProcessCpuTime ());
-    let nparticles = deref particleCount in
-    (if deref collectionModeEnabled then
-      writeCollectionBuffer (execTime, nparticles, overrun)
-    else ());
-    if debugMode then
-      printLn (join [ "execution time: ", int2string execTime
-                    , " overrun: ", int2string overrun ])
-    else ()
-  else ()
-
-let readConfigMessages = lam configBuffer.
-  if deref collectionModeEnabled then
-    let cmpTsv = lam l. lam r. cmpTimespec l.0 r.0 in
-    let particles = map value (sort cmpTsv configBuffer) in
-    iter
-      (lam p.
-        if eqi p 0 then modref collectionModeEnabled false
-        else modref particleCount p)
-      particles
-  else ()
+let writeCollectionMessage = lam cpu. lam overrun.
+  let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
+  modref cpuExecutionTime (getProcessCpuTime ());
+  modref collectBuffer (snoc (deref collectBuffer) (execTime, overrun))
 
 -- NOTE(larshum, 2023-09-10): Performs a soft delay of the program. Before the
 -- delay takes place, we flush the output buffers by writing data to output
@@ -136,16 +116,12 @@ let readConfigMessages = lam configBuffer.
 let sdelay =
   lam flushOutputs : () -> ().
   lam updateInputs : () -> ().
-  lam writeCollectionBuffer : (Int, Int, Int) -> ().
-  lam configurationBuffer : [TSV Int].
-  lam debugMode : Bool.
   lam delay : Int.
   flushOutputs ();
   let cpu = getProcessCpuTime () in
   let overrun = delayBy delay in
-  writeCollectionMessage debugMode writeCollectionBuffer cpu overrun;
+  writeCollectionMessage cpu overrun;
   updateInputs ();
-  readConfigMessages configurationBuffer;
   overrun
 
 -- NOTE(larshum, 2023-09-07): We use a hard-coded number of particles for all
@@ -199,34 +175,30 @@ let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
 
-let defaultParticles = 100
+let storeCollectedResults = lam taskId.
+  let collectionFile = concat taskId ".collect" in
+  match unzip (deref collectBuffer) with (execTimes, overruns) in
+  let wcet = foldl (lam acc. lam t. if gti t acc then t else acc) 0 execTimes in
+  let overran = any (lam or. if gti or 0 then true else false) overruns in
+  let msg = join [int2string wcet, " ", if overran then "1" else "0"] in
+  writeFile collectionFile msg
 
 let rtpplReadConfigurationFile = lam taskId.
   let configFile = concat taskId ".config" in
   if fileExists configFile then
-    let str = strTrim (readFile configFile) in
-    match strSplit "\n" str with [enableCollection, nparticles] then
-      let ec =
-        switch enableCollection
-        case "0" then false
-        case "1" then true
-        case _ then error "Invalid collection flag in configuration file"
-        end
-      in
-      let p = string2int nparticles in
-      Some (ec, p)
-    else
-      error "Invalid format of configuration file"
+    let p = string2int (readFile configFile) in
+    Some p
   else
     None ()
 
-let rtpplSetConfiguration = lam taskId.
-  match
+let defaultParticles = 100
+
+let rtpplLoadConfiguration = lam taskId.
+  let nparticles =
     optionGetOrElse
-      (lam. (true, defaultParticles))
+      (lam. defaultParticles)
       (rtpplReadConfigurationFile taskId)
-  with (enableCollection, nparticles) in
-  modref collectionModeEnabled enableCollection;
+  in
   modref particleCount nparticles
 
 let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
@@ -234,9 +206,9 @@ let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) ->
 
   -- Sets up a signal handler on SIGINT which calls code for closing all file
   -- descriptors before terminating.
-  setSigintHandler (lam. closeFileDescriptors (); exit 0);
+  setSigintHandler (lam. closeFileDescriptors (); storeCollectedResults taskId; exit 0);
 
-  rtpplSetConfiguration taskId;
+  rtpplLoadConfiguration taskId;
 
   -- Initialize the logical time to the current time of the physical clock
   modref monoLogicalTime (getMonotonicTime ());
