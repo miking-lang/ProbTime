@@ -1,14 +1,16 @@
+include "common.mc"
 include "digraph.mc"
 include "map.mc"
 include "sys.mc"
 
 include "definitions.mc"
+include "regression.mc"
 
 type TaskConfigState = {
   particles : Int,
-  observations : [{particles : Int, wcet : Int}],
+  observations : [(Int, Int)],
   budget : Int,
-  maxParticles : Int
+  particleBounds : (Int, Int)
 }
 
 let writeTaskParticles = lam path. lam taskId. lam nparticles.
@@ -17,10 +19,8 @@ let writeTaskParticles = lam path. lam taskId. lam nparticles.
 
 let readTaskWcet = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
-  match map string2int (strSplit " " (readFile taskCollectFile))
-  with [wcet, taskOverran] in
-  if eqi taskOverran 1 then 0
-  else wcet
+  if fileExists taskCollectFile then string2int (readFile taskCollectFile)
+  else 0
 
 let runTasks : String -> String -> [TaskData] -> Map String Int =
   lam path. lam runner. lam tasks.
@@ -62,11 +62,11 @@ let findVerticesWithIndegreeZero = lam g.
   let vertices = setOfSeq (digraphCmpv g) (digraphVertices g) in
   foldl removeDestination vertices (digraphEdges g)
 
-let linearRegression = lam obs.
-  match obs with [(x1, y1), (x2, y2)] ++ _ in
-  let slope = divf (int2float (subi y2 y1)) (int2float (subi x2 x1)) in
-  let intercept = subf (int2float y2) (mulf slope (int2float x2)) in
-  (slope, intercept)
+let clamp = lam bounds. lam x.
+  match bounds with (lowerBound, upperBound) in
+  if lti x lowerBound then lowerBound
+  else if gti x upperBound then upperBound
+  else x
 
 let configureTasks = lam options. lam g. lam tasks.
   recursive let work = lam g. lam state.
@@ -94,29 +94,35 @@ let configureTasks = lam options. lam g. lam tasks.
       -- Add the worst-case execution times to the accumulated sequence of
       -- observed worst-case execution times, coupled with the number of
       -- particles used.
-      -- TODO(larshum, 2023-09-22): Update the task states by estimating a new
-      -- number of particles to use. If we have made sufficient observations
-      -- and the results found so far are convincing, we can estimate a final
-      -- number of particles to use for a particular task. Once we have done
-      -- this, the vertex of the task should be removed from the graph.
       let state =
         mapFoldWithKey
           (lam state. lam taskId. lam wcet.
-            match mapLookup taskId state with Some task then
+            -- NOTE(larshum, 2023-09-25): If we get a WCET of 0, it means we
+            -- failed to read the collection file for some reason.
+            if eqi wcet 0 then state
+            else match mapLookup taskId state with Some task then
+              match task.particleBounds with (lowerBound, upperBound) in
               let obs = snoc task.observations (task.particles, wcet) in
               let task =
                 if eqi (length obs) 1 then
                   {task with particles = 100}
+                else if lti (length obs) 5 then
+                  if lti wcet task.budget then
+                    let np = muli task.particles 2 in
+                    let bounds = (task.particles, upperBound) in
+                    {task with particles = np, particleBounds = bounds}
+                  else
+                    let np = divi (addi lowerBound task.particles) 2 in
+                    let bounds = (lowerBound, task.particles) in
+                    {task with particles = np, particleBounds = bounds}
                 else
                   match linearRegression obs with (slope, intercept) in
-                  -- TODO(larshum, 2023-09-22): We should not make an
-                  -- estimation after just two runs.
                   let y = mulf (int2float task.budget) 0.9 in
                   let x = floorfi (divf (subf y intercept) slope) in
-                  let x = if gti x task.maxParticles then task.maxParticles else x in
-                  {task with particles = x, maxParticles = x}
+                  {task with particles = x, particleBounds = (x, x)}
               in
-              let task = {task with observations = obs} in
+              let task = {task with particles = clamp task.particleBounds task.particles,
+                                    observations = obs} in
               mapInsert taskId task state
             else error "Found WCET of invalid task, likely bug in configureTasks")
           state activeWcets
@@ -124,8 +130,9 @@ let configureTasks = lam options. lam g. lam tasks.
       let g =
         mapFoldWithKey
           (lam g. lam taskId. lam task.
-            if and (digraphHasVertex taskId g) (eqi task.particles task.maxParticles) then
+            if and (digraphHasVertex taskId g) (eqi task.particleBounds.0 task.particleBounds.1) then
               printLn (join ["Finished configuration of task ", taskId]);
+              printLn (strJoin " " (map (lam o. join ["(", int2string o.0, ",", int2string o.1, ")"]) task.observations));
               digraphRemoveVertex taskId g
             else g)
           g state
@@ -137,7 +144,7 @@ let configureTasks = lam options. lam g. lam tasks.
       (lam state. lam task.
         let taskState =
           { particles = task.particles, observations = [], budget = task.budget
-          , maxParticles = maxParticles }
+          , particleBounds = (1, options.maxParticles) }
         in
         mapInsert task.id taskState state)
       (mapEmpty cmpString)
@@ -162,12 +169,12 @@ let g =
     g
     [(0, 2), (1, 2), (1, 3), (2, 4), (3, 4)]
 in
-utest findVerticesWithIndegreeZero g with setOfSeq subi [0, 1] in
+utest findVerticesWithIndegreeZero g with setOfSeq subi [0, 1] using setEq in
 let g = digraphRemoveVertex 1 g in
-utest findVerticesWithIndegreeZero g with setOfSeq subi [0, 3] in
+utest findVerticesWithIndegreeZero g with setOfSeq subi [0, 3] using setEq in
 let g = digraphRemoveVertex 3 g in
-utest findVerticesWithIndegreeZero g with setOfSeq subi [0] in
+utest findVerticesWithIndegreeZero g with setOfSeq subi [0] using setEq in
 let g = digraphRemoveVertex 0 g in
-utest findVerticesWithIndegreeZero g with setOfSeq subi [2] in
+utest findVerticesWithIndegreeZero g with setOfSeq subi [2] using setEq in
 
 ()

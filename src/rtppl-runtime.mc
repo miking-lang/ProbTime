@@ -66,7 +66,7 @@ let wallLogicalTime : Ref Timespec = ref (0,0)
 let cpuExecutionTime : Ref Timespec = ref (0,0)
 
 let particleCount : Ref Int = ref 0
-let collectBuffer : Ref [(Int, Int)] = ref []
+let collectBuffer : Ref [Int] = ref []
 
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
@@ -100,10 +100,11 @@ let tsv : all a. Int -> a -> TSV a = lam offset. lam value.
   let lt = deref wallLogicalTime in
   (addTimespec lt (nanosToTimespec offset), value)
 
-let writeCollectionMessage = lam cpu. lam overrun.
+let writeCollectionMessage = lam.
+  let cpu = getProcessCpuTime () in
   let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
-  modref cpuExecutionTime (getProcessCpuTime ());
-  modref collectBuffer (snoc (deref collectBuffer) (execTime, overrun))
+  modref cpuExecutionTime cpu;
+  modref collectBuffer (snoc (deref collectBuffer) execTime)
 
 -- NOTE(larshum, 2023-09-10): Performs a soft delay of the program. Before the
 -- delay takes place, we flush the output buffers by writing data to output
@@ -118,9 +119,8 @@ let sdelay =
   lam updateInputs : () -> ().
   lam delay : Int.
   flushOutputs ();
-  let cpu = getProcessCpuTime () in
+  writeCollectionMessage ();
   let overrun = delayBy delay in
-  writeCollectionMessage cpu overrun;
   updateInputs ();
   overrun
 
@@ -177,11 +177,9 @@ let rtpplWriteDistFloatRecords =
 
 let storeCollectedResults = lam taskId.
   let collectionFile = concat taskId ".collect" in
-  match unzip (deref collectBuffer) with (execTimes, overruns) in
+  let execTimes = deref collectBuffer in
   let wcet = foldl (lam acc. lam t. if gti t acc then t else acc) 0 execTimes in
-  let overran = any (lam or. if gti or 0 then true else false) overruns in
-  let msg = join [int2string wcet, " ", if overran then "1" else "0"] in
-  writeFile collectionFile msg
+  writeFile collectionFile (int2string wcet)
 
 let rtpplReadConfigurationFile = lam taskId.
   let configFile = concat taskId ".config" in
