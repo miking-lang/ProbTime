@@ -11,23 +11,23 @@ type TaskConfigState = {
   maxParticles : Int
 }
 
+let writeTaskParticles = lam path. lam taskId. lam nparticles.
+  let taskConfigFile = sysJoinPath path (concat taskId ".config") in
+  writeFile taskConfigFile (int2string nparticles)
+
+let readTaskWcet = lam path. lam taskId.
+  let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
+  match map string2int (strSplit " " (readFile taskCollectFile))
+  with [wcet, taskOverran] in
+  if eqi taskOverran 1 then 0
+  else wcet
+
 let runTasks : String -> String -> [TaskData] -> Map String Int =
   lam path. lam runner. lam tasks.
 
   -- 1. Write the number of particles to use to the configuration file the
   -- respective task.
-  iter
-    (lam t.
-      let taskConfigFile = sysJoinPath path (concat t.id ".config") in
-      writeFile taskConfigFile (int2string t.particles))
-    tasks;
-
-  -- 2. Write the task-to-core mapping to a pre-defined path.
-  let ttcmStr =
-    strJoin "\n"
-      (map (lam t. join [t.id, " ", int2string t.core]) tasks)
-  in
-  let ttcmFile = sysJoinPath path taskToCoreMappingFile in
+  iter (lam t. writeTaskParticles path t.id t.particles) tasks;
 
   -- 2. Invoke the runner.
   let result = sysRunCommand [runner] "" "." in
@@ -37,15 +37,7 @@ let runTasks : String -> String -> [TaskData] -> Map String Int =
   -- If any task overran its period, we report this by setting the WCET to 0.
   if eqi result.returncode 0 then
     foldl
-      (lam acc. lam t.
-        let taskCollectFile = sysJoinPath path (concat t.id ".collect") in
-        match map string2int (strSplit " " (readFile taskCollectFile))
-        with [wcet, taskOverran] in
-        let wcet =
-          if eqi taskOverran 1 then 0
-          else wcet
-        in
-        mapInsert t.id wcet acc)
+      (lam acc. lam t. mapInsert t.id (readTaskWcet path t.id) acc)
       (mapEmpty cmpString) tasks
   else
     let msg = join [
