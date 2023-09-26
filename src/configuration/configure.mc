@@ -10,7 +10,8 @@ type TaskConfigState = {
   particles : Int,
   observations : [(Int, Int)],
   budget : Int,
-  particleBounds : (Int, Int)
+  particleBounds : (Int, Int),
+  finished : Bool
 }
 
 let writeTaskParticles = lam path. lam taskId. lam nparticles.
@@ -94,11 +95,20 @@ let configureTasks = lam options. lam g. lam tasks.
       -- Add the worst-case execution times to the accumulated sequence of
       -- observed worst-case execution times, coupled with the number of
       -- particles used.
+      let estimateNewParticles = lam task. lam obs.
+        match linearRegression obs with (slope, intercept) in
+        -- TODO(larshum, 2023-09-26): We may want to replace the constant value
+        -- with an option parameter the user can override, if they are more or
+        -- less willing to risk overrunning.
+        let y = mulf (int2float task.budget) 0.9 in
+        floorfi (divf (subf y intercept) slope)
+      in
       let state =
         mapFoldWithKey
           (lam state. lam taskId. lam wcet.
             -- NOTE(larshum, 2023-09-25): If we get a WCET of 0, it means we
-            -- failed to read the collection file for some reason.
+            -- failed to read the collection file for some reason. Ignore the
+            -- result.
             if eqi wcet 0 then state
             else match mapLookup taskId state with Some task then
               match task.particleBounds with (lowerBound, upperBound) in
@@ -106,7 +116,7 @@ let configureTasks = lam options. lam g. lam tasks.
               let task =
                 if eqi (length obs) 1 then
                   {task with particles = 100}
-                else if lti (length obs) 5 then
+                else if lti (length obs) 3 then
                   if lti wcet task.budget then
                     let np = muli task.particles 2 in
                     let bounds = (task.particles, upperBound) in
@@ -116,10 +126,16 @@ let configureTasks = lam options. lam g. lam tasks.
                     let bounds = (lowerBound, task.particles) in
                     {task with particles = np, particleBounds = bounds}
                 else
-                  match linearRegression obs with (slope, intercept) in
-                  let y = mulf (int2float task.budget) 0.9 in
-                  let x = floorfi (divf (subf y intercept) slope) in
-                  {task with particles = x, particleBounds = (x, x)}
+                  if eqi lowerBound upperBound then
+                    let minUtil = floorfi (mulf (int2float task.budget) 0.75) in
+                    if and (gti wcet minUtil) (lti wcet task.budget) then
+                      {task with finished = true}
+                    else
+                      let p = estimateNewParticles task obs in
+                      {task with particles = p, particleBounds = (p, p)}
+                  else
+                    let p = estimateNewParticles task obs in
+                    {task with particles = p, particleBounds = (p, p)}
               in
               let task = {task with particles = clamp task.particleBounds task.particles,
                                     observations = obs} in
@@ -130,7 +146,7 @@ let configureTasks = lam options. lam g. lam tasks.
       let g =
         mapFoldWithKey
           (lam g. lam taskId. lam task.
-            if and (digraphHasVertex taskId g) (eqi task.particleBounds.0 task.particleBounds.1) then
+            if and (digraphHasVertex taskId g) task.finished then
               printLn (join ["Finished configuration of task ", taskId]);
               printLn (strJoin " " (map (lam o. join ["(", int2string o.0, ",", int2string o.1, ")"]) task.observations));
               digraphRemoveVertex taskId g
@@ -144,7 +160,7 @@ let configureTasks = lam options. lam g. lam tasks.
       (lam state. lam task.
         let taskState =
           { particles = task.particles, observations = [], budget = task.budget
-          , particleBounds = (1, options.maxParticles) }
+          , particleBounds = (1, options.maxParticles), finished = false }
         in
         mapInsert task.id taskState state)
       (mapEmpty cmpString)
