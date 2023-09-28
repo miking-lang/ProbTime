@@ -14,6 +14,7 @@
 #include <vector>
 
 struct file_buffer {
+  char *id;
   char *start;
   char *pos;
   int64_t sz;
@@ -107,22 +108,25 @@ extern "C" {
 
   value open_file_nonblocking_stub(value file) {
     CAMLparam1(file);
-    const char *filename = String_val(file);
-    int fd = open(filename, O_RDWR | O_NONBLOCK);
+    const char *name = String_val(file);
+    char *id = (char*)malloc(strlen(name)+2);
+    sprintf(id, "/%s", name);
+    int fd = shm_open(id, O_RDWR | O_CREAT, 0);
     if (fd == -1) {
-      fprintf(stderr, "Could not open file %s: %s\n", filename, strerror(errno));
+      fprintf(stderr, "Could not open shared memory object %s: %s\n", id, strerror(errno));
       exit(1);
     }
     if (ftruncate(fd, BUFFER_SIZE) == -1) {
-      fprintf(stderr, "Error while creating memory buffer for file %s: %s\n", filename, strerror(errno));
+      fprintf(stderr, "Error while creating memory buffer for %s: %s\n", id, strerror(errno));
       exit(1);
     }
     void *ptr = mmap(NULL, BUFFER_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (ptr == (void*)-1) {
-      fprintf(stderr, "Error while mapping file %s to memory: %s\n", filename, strerror(errno));
+    if (ptr == MAP_FAILED) {
+      fprintf(stderr, "Error while mapping file %s to memory: %s\n", id, strerror(errno));
       exit(1);
     }
     file_buffer buf;
+    buf.id = id;
     buf.start = (char*)ptr;
     buf.pos = (char*)ptr;
     buf.sz = BUFFER_SIZE;
@@ -130,10 +134,12 @@ extern "C" {
     CAMLreturn(Val_int(fd));
   }
 
-  void close_file_descriptor_stub(value fd) {
-    CAMLparam1(fd);
-    close(Int_val(fd));
+  void close_file_descriptor_stub(value fd_val) {
+    CAMLparam1(fd_val);
+    int fd = Int_val(fd_val);
+    shm_unlink(buffers[fd].id);
     munmap(buffers[fd].start, buffers[fd].sz);
+    free(buffers[fd].id);
     buffers.erase(fd);
     CAMLreturn0;
   }
