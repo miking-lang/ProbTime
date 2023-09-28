@@ -20,7 +20,10 @@ let writeTaskParticles = lam path. lam taskId. lam nparticles.
 
 let readTaskWcet = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
-  if fileExists taskCollectFile then string2int (readFile taskCollectFile)
+  if fileExists taskCollectFile then
+    let wcet = string2int (readFile taskCollectFile) in
+    printLn (join [taskId, ": ", int2string wcet]);
+    wcet
   else 0
 
 let runTasks : String -> String -> [TaskData] -> Map String Int =
@@ -127,8 +130,9 @@ let configureTasks = lam options. lam g. lam tasks.
                     {task with particles = np, particleBounds = bounds}
                 else
                   if eqi lowerBound upperBound then
-                    let minUtil = floorfi (mulf (int2float task.budget) 0.75) in
-                    if and (gti wcet minUtil) (lti wcet task.budget) then
+                    let minUtil = floorfi (mulf (int2float task.budget) 0.8) in
+                    let maxUtil = floorfi (mulf (int2float task.budget) 0.95) in
+                    if and (geqi wcet minUtil) (leqi wcet maxUtil) then
                       {task with finished = true}
                     else
                       let p = estimateNewParticles task obs in
@@ -148,7 +152,6 @@ let configureTasks = lam options. lam g. lam tasks.
           (lam g. lam taskId. lam task.
             if and (digraphHasVertex taskId g) task.finished then
               printLn (join ["Finished configuration of task ", taskId]);
-              printLn (strJoin " " (map (lam o. join ["(", int2string o.0, ",", int2string o.1, ")"]) task.observations));
               digraphRemoveVertex taskId g
             else g)
           g state
