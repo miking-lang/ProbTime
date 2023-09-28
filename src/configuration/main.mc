@@ -52,7 +52,7 @@ let findTaskAllocationHeuristic = lam numCores. lam tasks.
   let coreTaskMap : [[TaskData]] = work (create numCores (lam. [])) tasks in
   foldli
     (lam acc. lam coreIdx. lam tasks.
-      foldl (lam acc. lam t. mapInsert t.id coreIdx acc) acc tasks)
+      foldl (lam acc. lam t. mapInsert t.id (addi coreIdx 1) acc) acc tasks)
     (mapEmpty cmpString) coreTaskMap
 
 let loadTaskToCoreMapping = lam options. lam tasks.

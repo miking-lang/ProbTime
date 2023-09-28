@@ -29,7 +29,7 @@ type TaskData = {
 
 let defaultTaskData = {
   id = "", period = 0, importance = 1, particles = 1,
-  budget = 0, core = 0, index = 0
+  budget = 0, core = 1, index = 0
 }
 
 let systemSpecFile = "network.json"
