@@ -119,7 +119,7 @@ let configureTasks = lam options. lam g. lam tasks.
               let task =
                 if eqi (length obs) 1 then
                   {task with particles = 100}
-                else if lti (length obs) 3 then
+                else if lti (length obs) 4 then
                   if lti wcet task.budget then
                     let np = muli task.particles 2 in
                     let bounds = (task.particles, upperBound) in
@@ -129,17 +129,15 @@ let configureTasks = lam options. lam g. lam tasks.
                     let bounds = (lowerBound, task.particles) in
                     {task with particles = np, particleBounds = bounds}
                 else
-                  if eqi lowerBound upperBound then
-                    let minUtil = floorfi (mulf (int2float task.budget) 0.8) in
-                    let maxUtil = floorfi (mulf (int2float task.budget) 0.95) in
-                    if and (geqi wcet minUtil) (leqi wcet maxUtil) then
-                      {task with finished = true}
-                    else
-                      let p = estimateNewParticles task obs in
-                      {task with particles = p, particleBounds = (p, p)}
+                  let minUtil = floorfi (mulf (int2float task.budget) 0.8) in
+                  let maxUtil = floorfi (mulf (int2float task.budget) 0.95) in
+                  if and (geqi wcet minUtil) (leqi wcet maxUtil) then
+                    {task with finished = true}
                   else
-                    let p = estimateNewParticles task obs in
-                    {task with particles = p, particleBounds = (p, p)}
+                    let p = clamp task.particleBounds (estimateNewParticles task obs) in
+                    let lb = mini p lowerBound in
+                    let ub = maxi p upperBound in
+                    {task with particles = p, particleBounds = (lb, ub)}
               in
               let task = {task with particles = clamp task.particleBounds task.particles,
                                     observations = obs} in
