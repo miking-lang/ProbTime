@@ -111,7 +111,8 @@ extern "C" {
     const char *name = String_val(file);
     char *id = (char*)malloc(strlen(name)+2);
     sprintf(id, "/%s", name);
-    int fd = shm_open(id, O_RDWR | O_CREAT, 0);
+    umask(0);
+    int fd = shm_open(id, O_RDWR | O_CREAT, 0666);
     if (fd == -1) {
       fprintf(stderr, "Could not open shared memory object %s: %s\n", id, strerror(errno));
       exit(1);
