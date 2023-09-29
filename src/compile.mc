@@ -1043,35 +1043,49 @@ lang RtpplCompileGenerated = RtpplCompileType
     } in
     _proj info targetExpr portStr
 
-  sem generateFileDescriptorCode : RuntimeIds -> Name -> Info
-                                -> [PortData] -> Expr
-  sem generateFileDescriptorCode rtIds taskId info =
+  sem generateFileDescriptorCode : Map String [String] -> RuntimeIds -> Name
+                                -> Info -> [PortData] -> Expr
+  sem generateFileDescriptorCode portMap rtIds taskId info =
   | ports ->
     let openFileDescField = lam port.
-      let portId = _getPortIdentifier taskId port.id in
+      match port with (portId, targetPortId) in
       let openFileExpr = TmApp {
-        lhs = _var info rtIds.openFile, rhs = _str info portId,
+        lhs = _var info rtIds.openFile, rhs = _str info targetPortId,
         ty = _tyuk info, info = info
       } in
-      (stringToSid port.id, openFileExpr)
+      (stringToSid portId, openFileExpr)
     in
     let closeFileDescExpr = lam port.
-      let bindId = nameNoSym (concat "close_" port.id) in
+      match port with (portId, _) in
+      let bindId = nameNoSym (concat "close_" portId) in
       TmLet {
         ident = bindId, tyAnnot = _tyuk info, tyBody = _tyuk info,
         body = TmApp {
           lhs = _var info rtIds.closeFile,
-          rhs = _proj info (_var info fileDescriptorsId) port.id,
+          rhs = _proj info (_var info fileDescriptorsId) portId,
           ty = _tyuk info, info = info},
         inexpr = uunit_, ty = _tyuk info, info = info}
     in
+    let fdports =
+      foldl
+        (lam acc. lam p.
+          if p.isInput then
+            cons (p.id, _getPortIdentifier taskId p.id) acc
+          else
+            let portId = _getPortIdentifier taskId p.id in
+            match mapLookup portId portMap with Some targetPorts then
+              concat (map (lam tp. (tp, tp)) targetPorts) acc
+            else
+              error (join ["Could not find targets of output port ", portId]))
+        [] ports
+    in
     let openFilesExpr = TmRecord {
-      bindings = mapFromSeq cmpSID (map openFileDescField ports),
+      bindings = mapFromSeq cmpSID (map openFileDescField fdports),
       ty = _tyuk info, info = info
     } in
     let closeFilesExpr = TmLam {
       ident = nameNoSym "", tyAnnot = _tyuk info, tyParam = _tyuk info,
-      body = bindall_ (map closeFileDescExpr ports),
+      body = bindall_ (map closeFileDescExpr fdports),
       ty = _tyuk info, info = info
     } in
     bindall_ [
@@ -1123,24 +1137,31 @@ lang RtpplCompileGenerated = RtpplCompileType
         ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info}
 
-  sem generateOutputFlushCode : Info -> [PortData] -> Expr
-  sem generateOutputFlushCode info =
+  sem generateOutputFlushCode : Map String [String] -> Name -> Info -> [PortData] -> Expr
+  sem generateOutputFlushCode targetPorts taskId info =
   | outputPorts ->
     let rtIds = getRuntimeIds () in
-    let flushPortData = lam port.
-      let fdExpr = getPortFileDescriptor info port.id in
-      let msgsExpr = getOutputBufferExpr info port.id in
-      -- NOTE(larshum, 2023-04-26): We need to give all bindings distinct
-      -- identifiers, or all but one is removed by the duplicate code
-      -- elimination used in the DPPL compiler.
-      let id = nameNoSym (concat "w_" port.id) in
-      TmLet {
-        ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
-        body = rtpplWriteExprType rtIds fdExpr msgsExpr port.ty,
-        inexpr = uunit_, ty = _tyuk info, info = info }
+    let flushPortData = lam outputPort.
+      let msgsExpr = getOutputBufferExpr info outputPort.id in
+      let portId = _getPortIdentifier taskId outputPort.id in
+      match mapLookup portId targetPorts with Some dstPorts then
+        foldl
+          (lam acc. lam dstPort.
+            let fdExpr = getPortFileDescriptor info dstPort in
+            -- NOTE(larshum, 2023-04-26): We need to give all bindings distinct
+            -- identifiers, or all but one is removed by the duplicate code
+            -- elimination used in the DPPL compiler.
+            let id = nameNoSym (join ["w_", nameGetStr taskId, "_", dstPort]) in
+            TmLet {
+              ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
+              body = rtpplWriteExprType rtIds fdExpr msgsExpr outputPort.ty,
+              inexpr = acc, ty = _tyuk info, info = info })
+          uunit_ dstPorts
+      else
+        error (concat "Could not find target ports of output port " outputPort.id)
     in
-    let clearPortData = lam port.
-      (stringToSid port.id, TmSeq {tms = [], ty = _tyuk info, info = info})
+    let clearPortData = lam outputPort.
+      (stringToSid outputPort.id, TmSeq {tms = [], ty = _tyuk info, info = info})
     in
     let clearExpr = TmLet {
       ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
@@ -1162,19 +1183,19 @@ lang RtpplCompileGenerated = RtpplCompileType
         ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info}
 
-  sem generateTaskSpecificRuntime : CompileEnv -> RtpplTask -> Expr
-  sem generateTaskSpecificRuntime env =
+  sem generateTaskSpecificRuntime : CompileEnv -> Map String [String] -> RtpplTask -> Expr
+  sem generateTaskSpecificRuntime env portMap =
   | TaskRtpplTask {id = {v = id}, templateId = {v = tid}, info = info} ->
     let rtIds = getRuntimeIds () in
     match mapLookup tid env.ports with Some ports then
       let ports = map (lam p. {p with ty = resolveTypeAlias env.aliases p.ty}) ports in
       match partition (lam p. p.isInput) ports with (inputPorts, outputPorts) in
       bindall_ [
-        generateFileDescriptorCode rtIds id info ports,
+        generateFileDescriptorCode portMap rtIds id info ports,
         generateBufferInitializationCode inputSeqsId info inputPorts,
         generateBufferInitializationCode outputSeqsId info outputPorts,
         generateInputUpdateCode info inputPorts,
-        generateOutputFlushCode info outputPorts ]
+        generateOutputFlushCode portMap id info outputPorts ]
     else
       errorSingle [info] "Compiler error in 'generateTaskSpecificRuntime'"
 end
@@ -1314,10 +1335,30 @@ lang RtpplCompile =
             , ulam_ "" taskRun ]
         in
         let tailExpr = appSeq_ (nvar_ runtimeIds.init) initArgs in
+        -- NOTE(larshum, 2023-09-28): We create a map from output port to the
+        -- input ports it connects to, so we know which input ports to write
+        -- output to.
+        let portMap =
+          foldl
+            (lam acc. lam conn.
+              match conn with (fromstr, tostr) in
+              match mapLookup fromstr acc with Some inports then
+                mapInsert fromstr (cons tostr inports) acc
+              else acc)
+            (foldl
+              (lam acc. lam p.
+                if p.isInput then
+                  acc
+                else
+                  let pid = _getPortIdentifier id p.id in
+                  mapInsert pid [] acc)
+              (mapEmpty cmpString) ports)
+            acc.connections
+        in
         -- NOTE(larshum, 2023-04-17): We generate the task-specific runtime
         -- code and insert it directly after the pre-generated runtime.
         let initId = let x = getRuntimeIds () in x.init in
-        let initExpr = generateTaskSpecificRuntime env task in
+        let initExpr = generateTaskSpecificRuntime env portMap task in
         let ast = insertBindingsAfter (nameEq initId) initExpr env.ast in
         let ast = specializeRtpplExprs env id ast in
         let ast =
@@ -1359,8 +1400,8 @@ lang RtpplCompile =
     let emptyResult = {
       tasks = mapEmpty nameCmp, ports = [], connections = []
     } in
-    let result = foldl (compileTask env) emptyResult tasks in
-    foldl addConnectionToResult result connections
+    let result = foldl addConnectionToResult emptyResult connections in
+    foldl (compileTask env) result tasks
 
   sem collectPortsPerTop : Map Name [PortData] -> RtpplTop -> Map Name [PortData]
   sem collectPortsPerTop portMap =

@@ -148,7 +148,6 @@ lang Rtppl =
   sem buildRtppl : RtpplOptions -> RtpplProgram -> CompileResult -> ()
   sem buildRtppl options program =
   | {tasks = tasks, ports = ports, connections = connections} ->
-    iter (createFile options) ports;
     generateJsonNetworkSpecification options connections program;
     mapFoldWithKey (lam. lam k. lam v. buildTaskExecutable options k v) () tasks
 end
