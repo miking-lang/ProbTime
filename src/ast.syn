@@ -106,7 +106,7 @@ prod Degenerate : RtpplStmt = "degenerate"
 prod Resample : RtpplStmt = "resample"
 prod Read : RtpplStmt = "read" port:LIdent "to" (dst:LName ("." proj:LIdent)?)
 prod Write : RtpplStmt = "write" src:RtpplExpr "to" port:LIdent ("offset" delay:RtpplExpr)?
-prod Sdelay : RtpplStmt = "sdelay" e:RtpplExpr
+prod Sdelay : RtpplStmt = "delay" e:RtpplExpr
 prod Condition : RtpplStmt =
   "cond" id:LName? "if" cond:RtpplExpr "{" thn:RtpplStmt* "}" "else" "{" els:RtpplStmt* "}"
 prod LoopPlusStmt : RtpplStmt = "loop" id:LName? loop:RtpplLoopStmt

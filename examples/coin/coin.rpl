@@ -49,7 +49,7 @@ template CoinFlip() {
   // We use 'd' in the loop to indicate that its updated values should be made
   // visible to later iterations of the loop.
   loop d {
-    sdelay 1s
+    delay 1s
     read in1 to indata
     printInput(indata)
 

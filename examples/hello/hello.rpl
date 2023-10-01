@@ -23,9 +23,9 @@ template X(period : Int) {
   // We use a loop without condition to run the task template until explicitly
   // terminated by the user.
   loop {
-    // By using an sdelay in each iteration, we get a periodic task. The
+    // By using n delay in each iteration, we get a periodic task. The
     // 'period' does not have to be a fixed value.
-    sdelay period
+    delay period
     read in1 to indata
     loop for x in f(indata) {
       write x to out1
