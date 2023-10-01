@@ -109,8 +109,9 @@ extern "C" {
   value open_file_nonblocking_stub(value file) {
     CAMLparam1(file);
     const char *name = String_val(file);
-    char *id = (char*)malloc(strlen(name)+2);
-    sprintf(id, "/%s", name);
+    int n = strlen(name) + 2;
+    char *id = (char*)malloc(n);;
+    snprintf(id, n, "/%s", name);
     umask(0);
     int fd = shm_open(id, O_RDWR | O_CREAT, 0666);
     if (fd == -1) {
