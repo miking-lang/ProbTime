@@ -32,7 +32,7 @@ install: default
 	make -C $(SUPPORT_LIB_PATH) install
 
 uninstall:
-	rm -f $(BIN_PATH)/$(RTPPL_NAME)
+	rm -f $(BIN_PATH)/$(RTPPL_NAME) $(BIN_PATH)/$(RTPPL_CONFIG_NAME)
 	rm -rf $(SRC_PATH)
 	make -C $(SUPPORT_LIB_PATH) uninstall
 
