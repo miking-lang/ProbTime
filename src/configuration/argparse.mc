@@ -7,12 +7,13 @@ type ConfigureOptions = {
   maxParticles : Int,
   maximizeUtilization : Bool,
   systemPath : String,
-  runnerCmd : String
+  runnerCmd : String,
+  budgetRatio : Float
 }
 
 let configureDefaultOptions = {
-  numCores = 1, maxParticles = maxParticles,
-  maximizeUtilization = false, systemPath = ".", runnerCmd = ""
+  numCores = 1, maxParticles = maxParticles, maximizeUtilization = false,
+  systemPath = ".", runnerCmd = "", budgetRatio = 0.9
 }
 
 let optionsConfig = [
@@ -32,7 +33,10 @@ let optionsConfig = [
   , lam p. {p.options with systemPath = argToString p} ),
   ( [("--runner", " ", "<cmd>")]
   , "Sets the command used to run the whole ProbTime system (required)"
-  , lam p. {p.options with runnerCmd = argToString p} )
+  , lam p. {p.options with runnerCmd = argToString p} ),
+  ( [("--budget-ratio", " ", "<f>")]
+  , "Specifies the ratio of the execution budgets to use (between zero and one) to control the margin of error"
+  , lam p. {p.options with budgetRatio = argToFloat p} )
 ]
 
 let printHelpMsgAndExit = lam.

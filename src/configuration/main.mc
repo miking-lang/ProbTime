@@ -164,6 +164,15 @@ let tasks =
       {t with budget = budget})
     tasks
 in
+-- NOTE(larshum, 2023-10-02): We re-scale the budgets of all tasks with a fixed
+-- ratio to ensure that we have some headroom. The ratio can be specified via
+-- the command-line.
+let tasks =
+  map
+    (lam t.
+      {t with budget = floorfi (mulf (int2float t.budget) options.budgetRatio)})
+    tasks
+in
 print "Task execution time budgets:\n";
 iter
   (lam t.

@@ -100,10 +100,7 @@ let configureTasks = lam options. lam g. lam tasks.
       -- particles used.
       let estimateNewParticles = lam task. lam obs.
         match linearRegression obs with (slope, intercept) in
-        -- TODO(larshum, 2023-09-26): We may want to replace the constant value
-        -- with an option parameter the user can override, if they are more or
-        -- less willing to risk overrunning.
-        let y = mulf (int2float task.budget) 0.9 in
+        let y = int2float task.budget in
         floorfi (divf (subf y intercept) slope)
       in
       let state =
@@ -130,7 +127,7 @@ let configureTasks = lam options. lam g. lam tasks.
                     {task with particles = np, particleBounds = bounds}
                 else
                   let minUtil = floorfi (mulf (int2float task.budget) 0.8) in
-                  let maxUtil = floorfi (mulf (int2float task.budget) 0.95) in
+                  let maxUtil = task.budget in
                   if and (geqi wcet minUtil) (leqi wcet maxUtil) then
                     {task with finished = true}
                   else
