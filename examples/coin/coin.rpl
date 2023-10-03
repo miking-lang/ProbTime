@@ -69,7 +69,7 @@ template CoinFlip() {
 system {
   sensor coin : Float
   actuator bias : Float
-  task cf = CoinFlip() priority 1
+  task cf = CoinFlip() importance 1
   coin -> cf.in1
   cf.out1 -> bias
 }

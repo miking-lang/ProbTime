@@ -164,7 +164,7 @@ prod Main : RtpplMain =
 prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType
 prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType
 
-prod Task : RtpplTask = "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")" "priority" p:Integer
+prod Task : RtpplTask = "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")" "importance" p:Integer
 prod Connection : RtpplConnection = from:RtpplPortSpec "->" to:RtpplPortSpec
 prod PortSpec : RtpplPortSpec = port:LName ("." id:LIdent)?
 
