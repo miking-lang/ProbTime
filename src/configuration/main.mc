@@ -94,6 +94,9 @@ let loadTaskToCoreMapping = lam options. lam tasks.
 let printNanosAsSeconds = lam ns.
   float2string (divf (int2float ns) 1e9)
 
+let importanceSum = lam tasks.
+  foldl (lam s. lam t. addi s t.importance) 0 tasks
+
 mexpr
 
 let options = parseConfigureOptions () in
@@ -140,29 +143,31 @@ let tasksPerCore : Map Int [TaskData] =
         mapInsert t.core [t] acc)
     (mapEmpty subi) tasks
 in
-let lambdas : Map Int Float =
-  mapMapWithKey (lam. lam coreTasks. computeLambda coreTasks) tasksPerCore
+-- NOTE(larshum, 2023-10-03): We compute the lambda and the sum of importance
+-- of all tasks per core. The latter is the length of the 'd' vector in the
+-- computation of the lambda, which is needed to normalize so that we can
+-- compare the values for different cores.
+let lambdas : Map Int (Float, Float) =
+  mapMapWithKey
+    (lam. lam coreTasks.
+      let sum = int2float (importanceSum coreTasks) in
+      let lambda = computeLambda coreTasks in
+      (lambda, sum))
+    tasksPerCore
 in
-match min cmpFloat (mapValues lambdas) with Some minLambda in
+match min (lam l. lam r. cmpFloat (divf l.0 l.1) (divf r.0 r.1)) (mapValues lambdas)
+with Some (minLambda, minSum) in
 let tasks =
-  map
-    (lam t.
-      let lambda =
-        if options.maximizeUtilization then
-          match mapLookup t.core lambdas with Some coreLambda then
-            coreLambda
-          else
-            let msg = join [
-              "Core ", int2string t.core, " of task ", t.id,
-              " was not assigned a lambda value."
-            ] in
-            error msg
-        else
-          minLambda
-      in
-      let budget = addi t.budget (floorfi (mulf (int2float t.importance) lambda)) in
-      {t with budget = budget})
-    tasks
+  mapFoldWithKey
+    (lam acc. lam. lam coreTasks.
+      let coreSum = int2float (importanceSum coreTasks) in
+      let lambda = mulf minLambda (divf coreSum minSum) in
+      concat
+        (map
+          (lam t. {t with budget = addi t.budget (floorfi (mulf (int2float t.importance) lambda))})
+          coreTasks)
+        acc)
+    [] tasksPerCore
 in
 -- NOTE(larshum, 2023-10-02): We re-scale the budgets of all tasks with a fixed
 -- ratio to ensure that we have some headroom. The ratio can be specified via
