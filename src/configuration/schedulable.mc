@@ -67,7 +67,7 @@ let computeLambda : [TaskData] -> Float = lam tasks.
             (create i
               (lam j.
                 let tj = getPeriod tasks j in
-                floorfi (divf (int2float t) (int2float tj))))
+                ceilfi (divf (int2float t) (int2float tj))))
             1
         in
         let ci = create (addi i 1) (lam j. getExecTime tasks j) in
