@@ -20,10 +20,7 @@ let writeTaskParticles = lam path. lam taskId. lam nparticles.
 
 let readTaskWcet = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
-  if fileExists taskCollectFile then
-    let wcet = string2int (readFile taskCollectFile) in
-    printLn (join [taskId, ": ", int2string wcet]);
-    wcet
+  if fileExists taskCollectFile then string2int (readFile taskCollectFile)
   else 0
 
 let runTasks : String -> String -> [TaskData] -> Map String Int =
@@ -41,7 +38,10 @@ let runTasks : String -> String -> [TaskData] -> Map String Int =
   -- If any task overran its period, we report this by setting the WCET to 0.
   if eqi result.returncode 0 then
     foldl
-      (lam acc. lam t. mapInsert t.id (readTaskWcet path t.id) acc)
+      (lam acc. lam t.
+        let wcet = readTaskWcet path t.id in
+        printLn (join [t.id, "(", int2string t.particles, "): ", int2string wcet]);
+        mapInsert t.id wcet acc)
       (mapEmpty cmpString) tasks
   else
     let msg = join [
