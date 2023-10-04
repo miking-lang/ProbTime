@@ -16,7 +16,10 @@ let cmpFloat : Float -> Float -> Int = lam l. lam r.
 
 let estimateBaseExecutionTime = lam options. lam tasks.
   let tasks = map (lam t. {t with particles = 1}) tasks in
-  let wcets : Map String Int = runTasks options.systemPath options.runnerCmd tasks in
+  --let wcets : Map String Int = runTasks options.systemPath options.runnerCmd tasks in
+  let wcets =
+    foldl (lam acc. lam t. mapInsert t.id 0 acc) (mapEmpty cmpString) tasks
+  in
   map
     (lam t.
       match mapLookup t.id wcets with Some wcet then
@@ -94,9 +97,6 @@ let loadTaskToCoreMapping = lam options. lam tasks.
 let printNanosAsSeconds = lam ns.
   float2string (divf (int2float ns) 1e9)
 
-let importanceSum = lam tasks.
-  foldl (lam s. lam t. addi s t.importance) 0 tasks
-
 mexpr
 
 let options = parseConfigureOptions () in
@@ -143,28 +143,16 @@ let tasksPerCore : Map Int [TaskData] =
         mapInsert t.core [t] acc)
     (mapEmpty subi) tasks
 in
--- NOTE(larshum, 2023-10-03): We compute the lambda and the sum of importance
--- of all tasks per core. The latter is the length of the 'd' vector in the
--- computation of the lambda, which is needed to normalize so that we can
--- compare the values for different cores.
-let lambdas : Map Int (Float, Float) =
-  mapMapWithKey
-    (lam. lam coreTasks.
-      let sum = int2float (importanceSum coreTasks) in
-      let lambda = computeLambda coreTasks in
-      (lambda, sum))
-    tasksPerCore
+let lambdas : Map Int Float =
+  mapMapWithKey (lam. lam coreTasks. computeLambda coreTasks) tasksPerCore
 in
-match min (lam l. lam r. cmpFloat (divf l.0 l.1) (divf r.0 r.1)) (mapValues lambdas)
-with Some (minLambda, minSum) in
+match min cmpFloat (mapValues lambdas) with Some minLambda in
 let tasks =
   mapFoldWithKey
     (lam acc. lam. lam coreTasks.
-      let coreSum = int2float (importanceSum coreTasks) in
-      let lambda = mulf minLambda (divf coreSum minSum) in
       concat
         (map
-          (lam t. {t with budget = addi t.budget (floorfi (mulf (int2float t.importance) lambda))})
+          (lam t. {t with budget = addi t.budget (floorfi (mulf (int2float t.importance) minLambda))})
           coreTasks)
         acc)
     [] tasksPerCore
