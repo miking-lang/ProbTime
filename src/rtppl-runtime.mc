@@ -110,10 +110,6 @@ let writeCollectionMessage = lam.
 -- delay takes place, we flush the output buffers by writing data to output
 -- ports. After the delay, we update the contents of the input sequences by
 -- reading from the input ports.
---
--- In addition, if running in collection mode, we
--- write collected data and read configuration inputs after the delay. We write
--- after the delay to be able to include the overrun.
 let sdelay =
   lam flushOutputs : () -> ().
   lam updateInputs : () -> ().
@@ -184,7 +180,7 @@ let storeCollectedResults = lam taskId.
 let rtpplReadConfigurationFile = lam taskId.
   let configFile = concat taskId ".config" in
   if fileExists configFile then
-    let p = string2int (readFile configFile) in
+    let p = string2int (strTrim (readFile configFile)) in
     Some p
   else
     None ()
