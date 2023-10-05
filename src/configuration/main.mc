@@ -16,10 +16,7 @@ let cmpFloat : Float -> Float -> Int = lam l. lam r.
 
 let estimateBaseExecutionTime = lam options. lam tasks.
   let tasks = map (lam t. {t with particles = 1}) tasks in
-  --let wcets : Map String Int = runTasks options.systemPath options.runnerCmd tasks in
-  let wcets =
-    foldl (lam acc. lam t. mapInsert t.id 0 acc) (mapEmpty cmpString) tasks
-  in
+  let wcets : Map String Int = runTasks options.systemPath options.runnerCmd tasks in
   map
     (lam t.
       match mapLookup t.id wcets with Some wcet then
