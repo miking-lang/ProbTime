@@ -116,4 +116,15 @@ utest schedulingPoints tasks 2 with [600, 700, 900, 1000] in
 utest schedulable tasks with true in
 utest computeLambda tasks with 0.0 using gtf in
 
+let tasks = [
+  {defaultTaskData with period = 1000}
+] in
+utest computeLambda tasks with 1000.0 using eqfApprox 1e-6 in
+
+let tasks = [
+  {defaultTaskData with period = 500},
+  {defaultTaskData with period = 1000}
+] in
+utest computeLambda tasks with 333.333333 using eqfApprox 1e-6 in
+
 ()
