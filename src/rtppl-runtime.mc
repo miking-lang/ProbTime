@@ -66,7 +66,8 @@ let wallLogicalTime : Ref Timespec = ref (0,0)
 let cpuExecutionTime : Ref Timespec = ref (0,0)
 
 let particleCount : Ref Int = ref 0
-let collectBuffer : Ref [Int] = ref []
+let taskBudget : Ref Int = ref 0
+let taskWcet : Ref Int = ref 0
 
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
@@ -104,7 +105,9 @@ let writeCollectionMessage = lam.
   let cpu = getProcessCpuTime () in
   let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
   modref cpuExecutionTime cpu;
-  modref collectBuffer (snoc (deref collectBuffer) execTime)
+  if gti execTime (deref taskWcet) then
+    modref taskWcet execTime
+  else ()
 
 -- NOTE(larshum, 2023-09-10): Performs a soft delay of the program. Before the
 -- delay takes place, we flush the output buffers by writing data to output
@@ -173,27 +176,34 @@ let rtpplWriteDistFloatRecords =
 
 let storeCollectedResults = lam taskId.
   let collectionFile = concat taskId ".collect" in
-  let execTimes = deref collectBuffer in
-  let wcet = foldl (lam acc. lam t. if gti t acc then t else acc) 0 execTimes in
-  writeFile collectionFile (int2string wcet)
+  let wcet = deref taskWcet in
+  let overran =
+    let b = deref taskBudget in
+    if lti b 0 then 0
+    else if gti wcet (deref taskBudget) then 1
+    else 0
+  in
+  writeFile collectionFile (join [int2string wcet, " ", int2string overran])
 
 let rtpplReadConfigurationFile = lam taskId.
   let configFile = concat taskId ".config" in
   if fileExists configFile then
-    let p = string2int (strTrim (readFile configFile)) in
-    Some p
+    match map string2int (strSplit " " (strTrim (readFile configFile)))
+    with [p, budget] in
+    Some (p, budget)
   else
     None ()
 
 let defaultParticles = 100
 
 let rtpplLoadConfiguration = lam taskId.
-  let nparticles =
+  match
     optionGetOrElse
-      (lam. defaultParticles)
+      (lam. (defaultParticles, negi 1))
       (rtpplReadConfigurationFile taskId)
-  in
-  modref particleCount nparticles
+  with (nparticles, budget) in
+  modref particleCount nparticles;
+  modref taskBudget budget
 
 let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.

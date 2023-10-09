@@ -14,13 +14,20 @@ type TaskConfigState = {
   finished : Bool
 }
 
-let writeTaskParticles = lam path. lam taskId. lam nparticles.
-  let taskConfigFile = sysJoinPath path (concat taskId ".config") in
-  writeFile taskConfigFile (int2string nparticles)
+let writeTaskConfig = lam path. lam task.
+  let taskConfigFile = sysJoinPath path (concat task.id ".config") in
+  let msg = join [int2string task.particles, " ", int2string task.budget] in
+  writeFile taskConfigFile msg
 
-let readTaskWcet = lam path. lam taskId.
+let readTaskCollect = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
-  if fileExists taskCollectFile then string2int (readFile taskCollectFile)
+  if fileExists taskCollectFile then
+    match map string2int (strSplit " " (readFile taskCollectFile))
+    with [p, ovr] in
+    (if eqi ovr 1 then
+      printLn (join ["Task ", taskId, " overran its budget"])
+    else ());
+    p
   else 0
 
 let runTasks : String -> String -> [TaskData] -> Map String Int =
@@ -28,7 +35,7 @@ let runTasks : String -> String -> [TaskData] -> Map String Int =
 
   -- 1. Write the number of particles to use to the configuration file the
   -- respective task.
-  iter (lam t. writeTaskParticles path t.id t.particles) tasks;
+  iter (lam t. writeTaskConfig path t) tasks;
 
   -- 2. Invoke the runner.
   let result = sysRunCommand [runner] "" "." in
@@ -39,7 +46,7 @@ let runTasks : String -> String -> [TaskData] -> Map String Int =
   if eqi result.returncode 0 then
     foldl
       (lam acc. lam t.
-        let wcet = readTaskWcet path t.id in
+        let wcet = readTaskCollect path t.id in
         printLn (join [t.id, "(", int2string t.particles, "): ", int2string wcet]);
         mapInsert t.id wcet acc)
       (mapEmpty cmpString) tasks
@@ -77,8 +84,8 @@ let configureTasks = lam options. lam g. lam tasks.
     if eqi (digraphCountVertices g) 0 then
       map
         (lam task.
-          match task with (taskId, {particles = p}) in
-          (taskId, p))
+          match task with (taskId, {particles = p, budget = b}) in
+          (taskId, p, b))
         (mapBindings state)
     else
       let active = findVerticesWithIndegreeZero g in

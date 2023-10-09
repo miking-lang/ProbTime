@@ -176,9 +176,10 @@ printLn "Configuring the number of particles to use per task";
 let confResult = configureTasks options g tasks in
 iter
   (lam e.
-    match e with (taskId, particles) in
+    match e with (taskId, particles, budget) in
     let taskConfigFile = sysJoinPath options.systemPath (concat taskId ".config") in
-    writeFile taskConfigFile (int2string particles))
+    let msg = join [int2string particles, " ", int2string budget] in
+    writeFile taskConfigFile msg)
   confResult;
 print "Configuration complete!\nThe tasks have been assigned the following number of particles:\n";
 
