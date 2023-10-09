@@ -142,8 +142,12 @@ let configureTasks = lam options. lam g. lam tasks.
                     let np = divi task.particles 2 in
                     {task with particles = np, upperBound = task.particles}
                 else if eqi (length obs) 5 then
-                  let np = estimateNewParticles task obs in
-                  {task with particles = np, observations = obs}
+                  if lti wcet task.budget then
+                    let np = estimateNewParticles task obs in
+                    {task with particles = np, observations = obs}
+                  else
+                    let np = divi task.particles 2 in
+                    {task with particles = np, upperBound = task.particles}
                 else
                   -- NOTE(larshum, 2023-10-09): We accept the current particle
                   -- count if our estimated WCET close to, but not beyond, the
