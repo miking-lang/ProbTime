@@ -10,9 +10,11 @@ type TaskConfigState = {
   particles : Int,
   observations : [(Int, Int)],
   budget : Int,
-  particleBounds : (Int, Int),
+  upperBound : Int,
   finished : Bool
 }
+
+let defaultUpperBound = floorfi 1e10
 
 let writeTaskConfig = lam path. lam task.
   let taskConfigFile = sysJoinPath path (concat task.id ".config") in
@@ -73,12 +75,6 @@ let findVerticesWithIndegreeZero = lam g.
   let vertices = setOfSeq (digraphCmpv g) (digraphVertices g) in
   foldl removeDestination vertices (digraphEdges g)
 
-let clamp = lam bounds. lam x.
-  match bounds with (lowerBound, upperBound) in
-  if lti x lowerBound then lowerBound
-  else if gti x upperBound then upperBound
-  else x
-
 let configureTasks = lam options. lam g. lam tasks.
   recursive let work = lam g. lam state.
     if eqi (digraphCountVertices g) 0 then
@@ -107,8 +103,11 @@ let configureTasks = lam options. lam g. lam tasks.
       -- particles used.
       let estimateNewParticles = lam task. lam obs.
         match linearRegression obs with (slope, intercept) in
-        let y = int2float task.budget in
-        floorfi (divf (subf y intercept) slope)
+        -- NOTE(larshum, 2023-10-09): We do not aim to use 100 % of the budget,
+        -- but rather a ratio thereof (used to determine a safety margin).
+        let y = mulf (int2float task.budget) options.budgetRatio in
+        let p = floorfi (divf (subf y intercept) slope) in
+        if lti p task.upperBound then p else subi task.upperBound 1
       in
       let state =
         mapFoldWithKey
@@ -118,33 +117,49 @@ let configureTasks = lam options. lam g. lam tasks.
             -- result.
             if eqi wcet 0 then state
             else match mapLookup taskId state with Some task then
-              match task.particleBounds with (lowerBound, upperBound) in
               let obs = snoc task.observations (task.particles, wcet) in
               let task =
                 if eqi (length obs) 1 then
-                  {task with particles = 100}
-                else if lti (length obs) 4 then
+                  {task with particles = 100, observations = obs}
+                else if lti (length obs) 5 then
                   if lti wcet task.budget then
-                    let np = muli task.particles 2 in
-                    let bounds = (task.particles, upperBound) in
-                    {task with particles = np, particleBounds = bounds}
+                    -- NOTE(larshum, 2023-10-05): If the upper bound is at its
+                    -- default value we have not overran so far, so we double
+                    -- the number of particles. Otherwise, we pick a value
+                    -- between the last particle count and the upper bound.
+                    let np =
+                      if eqi task.upperBound defaultUpperBound then
+                        muli task.particles 2
+                      else
+                        divi (addi task.particles task.upperBound) 2
+                    in
+                    {task with particles = np, observations = obs}
                   else
-                    let np = divi (addi lowerBound task.particles) 2 in
-                    let bounds = (lowerBound, task.particles) in
-                    {task with particles = np, particleBounds = bounds}
+                    -- NOTE(larshum, 2023-10-05): If the task overruns its
+                    -- budget, we do not record the new observation as it might
+                    -- not behave linearly, and therefore disturb our final
+                    -- estimation.
+                    let np = divi task.particles 2 in
+                    {task with particles = np, upperBound = task.particles}
+                else if eqi (length obs) 5 then
+                  let np = estimateNewParticles task obs in
+                  {task with particles = np, observations = obs}
                 else
-                  let minUtil = floorfi (mulf (int2float task.budget) 0.8) in
-                  let maxUtil = task.budget in
-                  if and (geqi wcet minUtil) (leqi wcet maxUtil) then
-                    {task with finished = true}
+                  -- NOTE(larshum, 2023-10-09): We accept the current particle
+                  -- count if our estimated WCET close to, but not beyond, the
+                  -- assigned execution time budget.
+                  let lowerExecBound = floorfi (mulf (int2float task.budget) 0.8) in
+                  if and (gti wcet lowerExecBound) (leqi wcet task.budget) then
+                    {task with finished = true, observations = []}
                   else
-                    let p = clamp task.particleBounds (estimateNewParticles task obs) in
-                    let lb = mini p lowerBound in
-                    let ub = maxi p upperBound in
-                    {task with particles = p, particleBounds = (lb, ub)}
+                    let upperBound =
+                      if gti wcet lowerExecBound then task.particles
+                      else task.upperBound
+                    in
+                    let np = estimateNewParticles task obs in
+                    {task with particles = np, upperBound = upperBound,
+                               observations = obs}
               in
-              let task = {task with particles = clamp task.particleBounds task.particles,
-                                    observations = obs} in
               mapInsert taskId task state
             else error "Found WCET of invalid task, likely bug in configureTasks")
           state activeWcets
@@ -165,7 +180,7 @@ let configureTasks = lam options. lam g. lam tasks.
       (lam state. lam task.
         let taskState =
           { particles = task.particles, observations = [], budget = task.budget
-          , particleBounds = (1, options.maxParticles), finished = false }
+          , upperBound = defaultUpperBound, finished = false }
         in
         mapInsert task.id taskState state)
       (mapEmpty cmpString)

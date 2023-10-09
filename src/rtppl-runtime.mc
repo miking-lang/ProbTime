@@ -199,7 +199,7 @@ let defaultParticles = 100
 let rtpplLoadConfiguration = lam taskId.
   match
     optionGetOrElse
-      (lam. (defaultParticles, negi 1))
+      (lam. (defaultParticles, 0))
       (rtpplReadConfigurationFile taskId)
   with (nparticles, budget) in
   modref particleCount nparticles;
