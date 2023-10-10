@@ -1207,7 +1207,6 @@ lang RtpplCompile =
 
   type CompileResult = {
     tasks : Map Name Expr,
-    ports : [String],
     connections : [(String, String)]
   }
 
@@ -1365,9 +1364,7 @@ lang RtpplCompile =
           symbolize
             (extractAst (identifiersInExpr (setEmpty nameCmp) tailExpr) ast)
         in
-        let portNames = map (lam p. _getPortIdentifier id p.id) ports in
-        {acc with tasks = mapInsert id (bind_ ast tailExpr) acc.tasks,
-                  ports = concat acc.ports portNames}
+        {acc with tasks = mapInsert id (bind_ ast tailExpr) acc.tasks}
       else
         errorSingle [info]
           "Task is instantiated from definition with no port declarations"
@@ -1397,9 +1394,7 @@ lang RtpplCompile =
   sem compileMain : CompileEnv -> RtpplMain -> CompileResult
   sem compileMain env =
   | MainRtpplMain {tasks = tasks, connections = connections} ->
-    let emptyResult = {
-      tasks = mapEmpty nameCmp, ports = [], connections = []
-    } in
+    let emptyResult = { tasks = mapEmpty nameCmp, connections = [] } in
     let result = foldl addConnectionToResult emptyResult connections in
     foldl (compileTask env) result tasks
 
