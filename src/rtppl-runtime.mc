@@ -67,7 +67,7 @@ let cpuExecutionTime : Ref Timespec = ref (0,0)
 
 let particleCount : Ref Int = ref 0
 let taskBudget : Ref Int = ref 0
-let taskWcet : Ref Int = ref 0
+let taskExecTimes : Ref [Int] = ref []
 
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
@@ -105,9 +105,7 @@ let writeCollectionMessage = lam.
   let cpu = getProcessCpuTime () in
   let execTime = timespecToNanos (diffTimespec cpu (deref cpuExecutionTime)) in
   modref cpuExecutionTime cpu;
-  if gti execTime (deref taskWcet) then
-    modref taskWcet execTime
-  else ()
+  modref taskExecTimes (snoc (deref taskExecTimes) execTime)
 
 -- NOTE(larshum, 2023-09-10): Performs a soft delay of the program. Before the
 -- delay takes place, we flush the output buffers by writing data to output
@@ -176,14 +174,16 @@ let rtpplWriteDistFloatRecords =
 
 let storeCollectedResults = lam taskId.
   let collectionFile = concat taskId ".collect" in
-  let wcet = deref taskWcet in
+  let execTimes = deref taskExecTimes in
+  let wcet = foldl maxi 0 execTimes in
   let overran =
     let b = deref taskBudget in
     if lti b 0 then 0
     else if gti wcet (deref taskBudget) then 1
     else 0
   in
-  writeFile collectionFile (join [int2string wcet, " ", int2string overran])
+  let data = map int2string (snoc execTimes overran) in
+  writeFile collectionFile (strJoin "\n" data)
 
 let rtpplReadConfigurationFile = lam taskId.
   let configFile = concat taskId ".config" in

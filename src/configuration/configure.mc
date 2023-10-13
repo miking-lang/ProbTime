@@ -24,20 +24,19 @@ let writeTaskConfig = lam path. lam task.
 let readTaskCollect = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
   recursive let readRetry = lam retries.
-    let p =
+    let wcet =
       if fileExists taskCollectFile then
-        match map string2int (strSplit " " (readFile taskCollectFile))
-        with [p, _] in
-        p
+        let data = map string2int (strSplit "\n" (strTrim (readFile taskCollectFile))) in
+        foldl maxi 0 (init data)
       else
         0
     in
-    if eqi p 0 then
-      if eqi retries 0 then p
+    if eqi wcet 0 then
+      if eqi retries 0 then wcet
       else
         sleepMs 50;
         readRetry (subi retries 1)
-    else p
+    else wcet
   in
   readRetry 3
 
