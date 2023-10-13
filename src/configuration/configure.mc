@@ -8,7 +8,7 @@ include "regression.mc"
 
 type TaskConfigState = {
   particles : Int,
-  observations : [(Int, Int)],
+  observations : Map Int Int,
   budget : Int,
   upperBound : Int,
   finished : Bool
@@ -23,14 +23,23 @@ let writeTaskConfig = lam path. lam task.
 
 let readTaskCollect = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
-  if fileExists taskCollectFile then
-    match map string2int (strSplit " " (readFile taskCollectFile))
-    with [p, ovr] in
-    (if eqi ovr 1 then
-      printLn (join ["Task ", taskId, " overran its budget"])
-    else ());
-    p
-  else 0
+  recursive let readRetry = lam retries.
+    let p =
+      if fileExists taskCollectFile then
+        match map string2int (strSplit " " (readFile taskCollectFile))
+        with [p, _] in
+        p
+      else
+        0
+    in
+    if eqi p 0 then
+      if eqi retries 0 then p
+      else
+        sleepMs 50;
+        readRetry (subi retries 1)
+    else p
+  in
+  readRetry 3
 
 let runTasks : String -> String -> [TaskData] -> Map String Int =
   lam path. lam runner. lam tasks.
@@ -75,7 +84,28 @@ let findVerticesWithIndegreeZero = lam g.
   let vertices = setOfSeq (digraphCmpv g) (digraphVertices g) in
   foldl removeDestination vertices (digraphEdges g)
 
-let configureTasks = lam options. lam g. lam tasks.
+-- We find the maximum offset from the line with the given slope and intercept
+-- to a line with the same slope passing through an observation.
+let maxObsIntercept = lam slope. lam observations.
+  mapFoldWithKey
+    (lam maxOfs. lam nparticles. lam wcet.
+      let ofs = subf (int2float wcet) (mulf (int2float nparticles) slope) in
+      maxf ofs maxOfs)
+    0.0 observations
+
+-- Add the worst-case execution times to the accumulated sequence of
+-- observed worst-case execution times, coupled with the number of
+-- particles used.
+let estimateNewParticles = lam options. lam task. lam obs.
+  match linearRegression (mapBindings obs) with (slope, intercept) in
+  let maxIntercept = maxObsIntercept slope obs in
+  let y = mulf (int2float task.budget) options.budgetRatio in
+  let p = floorfi (divf (subf y maxIntercept) slope) in
+  if leqi p 0 then 1
+  else if lti p task.upperBound then p
+  else subi task.upperBound 1
+
+let configureTasks = lam options. lam taskGraph. lam tasks.
   recursive let work = lam g. lam state.
     if eqi (digraphCountVertices g) 0 then
       map
@@ -84,113 +114,164 @@ let configureTasks = lam options. lam g. lam tasks.
           (taskId, p, b))
         (mapBindings state)
     else
-      let active = findVerticesWithIndegreeZero g in
       let wcets =
         runTasks
           options.systemPath options.runnerCmd
           (tasksWithParticleCounts tasks state)
       in
-      let activeWcets =
-        mapMerge
-          (lam lhs. lam rhs.
-            match (lhs, rhs) with (Some l, Some _) then Some l
-            else None ())
-          wcets active
-      in
-
-      -- Add the worst-case execution times to the accumulated sequence of
-      -- observed worst-case execution times, coupled with the number of
-      -- particles used.
-      let estimateNewParticles = lam task. lam obs.
-        match linearRegression obs with (slope, intercept) in
-        -- NOTE(larshum, 2023-10-09): We do not aim to use 100 % of the budget,
-        -- but rather a ratio thereof (used to determine a safety margin).
-        let y = mulf (int2float task.budget) options.budgetRatio in
-        let p = floorfi (divf (subf y intercept) slope) in
-        if lti p task.upperBound then p else subi task.upperBound 1
-      in
-      let state =
-        mapFoldWithKey
-          (lam state. lam taskId. lam wcet.
-            -- NOTE(larshum, 2023-09-25): If we get a WCET of 0, it means we
-            -- failed to read the collection file for some reason. Ignore the
-            -- result.
-            if eqi wcet 0 then state
-            else match mapLookup taskId state with Some task then
-              let obs = snoc task.observations (task.particles, wcet) in
-              let task =
-                if eqi (length obs) 1 then
-                  {task with particles = 100, observations = obs}
-                else if lti (length obs) 5 then
-                  if lti wcet task.budget then
-                    -- NOTE(larshum, 2023-10-05): If the upper bound is at its
-                    -- default value we have not overran so far, so we double
-                    -- the number of particles. Otherwise, we pick a value
-                    -- between the last particle count and the upper bound.
-                    let np =
-                      if eqi task.upperBound defaultUpperBound then
-                        muli task.particles 2
+      -- NOTE(larshum, 2023-10-12): If a task we had already fixed the number
+      -- of particles for overruns, we need to re-configure it and all tasks
+      -- that depend on its result.
+      match
+        foldl
+          (lam acc. lam task.
+            match acc with (state, overran) in
+            match (mapLookup task.id state, mapLookup task.id wcets)
+            with (Some ts, Some wcet) then
+              if and ts.finished (gti wcet task.budget) then
+                let obs =
+                  mapInsertWith maxi ts.particles wcet ts.observations
+                in
+                printLn (join [
+                  "Fixed task ", task.id, " overran; wcet=", int2string wcet,
+                  ", budget=", int2string task.budget]);
+                let p =
+                  if geqi wcet task.period then
+                    divi ts.particles 2
+                  else
+                    estimateNewParticles options ts obs
+                in
+                let ts = {ts with particles = p, upperBound = ts.particles,
+                                  observations = obs, finished = false}
+                in
+                (mapInsert task.id ts state, true)
+              else acc
+            else acc)
+          (state, false) tasks
+      with (state, overran) in
+      if overran then
+        recursive let dropFinishedTasks = lam g.
+          let active = findVerticesWithIndegreeZero g in
+          let gNew =
+            mapFoldWithKey
+              (lam g. lam taskId. lam.
+                match mapLookup taskId state with Some task then
+                  if task.finished then
+                    digraphRemoveVertex taskId g
+                  else g
+                else g)
+              g active
+          in
+          if digraphGraphEq g gNew then g
+          else dropFinishedTasks gNew
+        in
+        -- NOTE(larshum, 2023-10-11): If at least one task overruns its budget,
+        -- we need to restart the configuration from the overrunning tasks.
+        -- These tasks and all the tasks that depend on them need to be
+        -- re-configured.
+        let g = dropFinishedTasks taskGraph in
+        let active = findVerticesWithIndegreeZero g in
+        let state =
+          foldl
+            (lam state. lam taskId.
+              if setMem taskId active then state
+              else match mapLookup taskId state with Some taskState then
+                let ts =
+                  {taskState with finished = false,
+                                  observations = mapEmpty subi}
+                in
+                mapInsert taskId ts state
+              else state)
+            state (digraphVertices g)
+        in
+        work g state
+      else
+        let active = findVerticesWithIndegreeZero g in
+        print "Active tasks: ";
+        printLn (strJoin " " (setToSeq active));
+        let activeWcets =
+          mapMerge
+            (lam lhs. lam rhs.
+              match (lhs, rhs) with (Some l, Some _) then Some l
+              else None ())
+            wcets active
+        in
+        let state =
+          mapFoldWithKey
+            (lam state. lam taskId. lam wcet.
+              -- NOTE(larshum, 2023-09-25): If we get a WCET of 0, it means we
+              -- failed to read the collection file for some reason. Ignore the
+              -- result and re-run.
+              if eqi wcet 0 then state
+              else match mapLookup taskId state with Some task then
+                let obs =
+                  mapInsertWith maxi task.particles wcet task.observations
+                in
+                let task =
+                  if eqi (mapSize obs) 1 then
+                    {task with particles = 100, observations = obs}
+                  else if lti (mapSize obs) 5 then
+                    if lti wcet task.budget then
+                      -- NOTE(larshum, 2023-10-05): If the upper bound is at its
+                      -- default value we have not overran so far, so we double
+                      -- the number of particles. Otherwise, we pick a value
+                      -- between the last particle count and the upper bound.
+                      let np =
+                        if eqi task.upperBound defaultUpperBound then
+                          muli task.particles 2
+                        else
+                          divi (addi task.particles task.upperBound) 2
+                      in
+                      {task with particles = np, observations = obs}
+                    else
+                      -- NOTE(larshum, 2023-10-05): If the task overruns its
+                      -- budget, we do not record the new observation as it might
+                      -- not behave linearly, and therefore disturb our final
+                      -- estimation.
+                      let np = divi task.particles 2 in
+                      {task with particles = np, upperBound = task.particles}
+                  else
+                    if gti wcet (floorfi (mulf (int2float task.budget) options.budgetRatio)) then
+                      let task = {task with upperBound = task.particles} in
+                      let p = estimateNewParticles options task obs in
+                      {task with particles = p, observations = obs}
+                    else
+                      let p = estimateNewParticles options task obs in
+                      if gti p task.particles then
+                        {task with particles = p, observations = obs}
                       else
-                        divi (addi task.particles task.upperBound) 2
-                    in
-                    {task with particles = np, observations = obs}
-                  else
-                    -- NOTE(larshum, 2023-10-05): If the task overruns its
-                    -- budget, we do not record the new observation as it might
-                    -- not behave linearly, and therefore disturb our final
-                    -- estimation.
-                    let np = divi task.particles 2 in
-                    {task with particles = np, upperBound = task.particles}
-                else if eqi (length obs) 5 then
-                  if lti wcet task.budget then
-                    let np = estimateNewParticles task obs in
-                    {task with particles = np, observations = obs}
-                  else
-                    let np = divi task.particles 2 in
-                    {task with particles = np, upperBound = task.particles}
-                else
-                  -- NOTE(larshum, 2023-10-09): We accept the current particle
-                  -- count if our estimated WCET close to, but not beyond, the
-                  -- assigned execution time budget.
-                  let lowerExecBound = floorfi (mulf (int2float task.budget) 0.8) in
-                  if and (gti wcet lowerExecBound) (leqi wcet task.budget) then
-                    {task with finished = true, observations = []}
-                  else
-                    let upperBound =
-                      if gti wcet lowerExecBound then task.particles
-                      else task.upperBound
-                    in
-                    let np = estimateNewParticles task obs in
-                    {task with particles = np, upperBound = upperBound,
-                               observations = obs}
-              in
-              mapInsert taskId task state
-            else error "Found WCET of invalid task, likely bug in configureTasks")
-          state activeWcets
-      in
-      let g =
-        mapFoldWithKey
-          (lam g. lam taskId. lam task.
-            if and (digraphHasVertex taskId g) task.finished then
-              printLn (join ["Finished configuration of task ", taskId]);
-              digraphRemoveVertex taskId g
-            else g)
-          g state
-      in
-      work g state
+                        {task with finished = true, observations = obs}
+                in
+                mapInsert taskId task state
+              else error "Found WCET of invalid task, likely bug in configureTasks")
+            state activeWcets
+        in
+        let g =
+          mapFoldWithKey
+            (lam g. lam taskId. lam task.
+              if digraphHasVertex taskId g then
+                if task.finished then
+                  printLn (join ["Finished configuration of task ", taskId]);
+                  digraphRemoveVertex taskId g
+                else g
+              else g)
+            g state
+        in
+        work g state
   in
   let state =
     foldl
       (lam state. lam task.
         let taskState =
-          { particles = task.particles, observations = [], budget = task.budget
-          , upperBound = defaultUpperBound, finished = false }
+          { particles = task.particles, observations = mapEmpty subi
+          , budget = task.budget, upperBound = defaultUpperBound
+          , finished = false }
         in
         mapInsert task.id taskState state)
       (mapEmpty cmpString)
       tasks
   in
-  work g state
+  work taskGraph state
 
 mexpr
 
