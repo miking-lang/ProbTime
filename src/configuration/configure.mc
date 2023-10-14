@@ -5,6 +5,7 @@ include "sys.mc"
 
 include "definitions.mc"
 include "regression.mc"
+include "schedulable.mc"
 
 type TaskConfigState = {
   particles : Int,
@@ -34,7 +35,7 @@ let readTaskCollect = lam path. lam taskId.
     if eqi wcet 0 then
       if eqi retries 0 then wcet
       else
-        sleepMs 50;
+        sleepMs 500;
         readRetry (subi retries 1)
     else wcet
   in
@@ -104,8 +105,19 @@ let estimateNewParticles = lam options. lam task. lam obs.
   else if lti p task.upperBound then p
   else subi task.upperBound 1
 
-let configureTasks = lam options. lam taskGraph. lam tasks.
+let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
   recursive let work = lam g. lam state.
+    let g =
+      mapFoldWithKey
+        (lam g. lam taskId. lam task.
+          if digraphHasVertex taskId g then
+            if task.finished then
+              printLn (join ["Finished configuration of task ", taskId]);
+              digraphRemoveVertex taskId g
+            else g
+          else g)
+        g state
+    in
     if eqi (digraphCountVertices g) 0 then
       map
         (lam task.
@@ -245,17 +257,6 @@ let configureTasks = lam options. lam taskGraph. lam tasks.
               else error "Found WCET of invalid task, likely bug in configureTasks")
             state activeWcets
         in
-        let g =
-          mapFoldWithKey
-            (lam g. lam taskId. lam task.
-              if digraphHasVertex taskId g then
-                if task.finished then
-                  printLn (join ["Finished configuration of task ", taskId]);
-                  digraphRemoveVertex taskId g
-                else g
-              else g)
-            g state
-        in
         work g state
   in
   let state =
@@ -271,6 +272,81 @@ let configureTasks = lam options. lam taskGraph. lam tasks.
       tasks
   in
   work taskGraph state
+
+let configureTasksParticleFairness = lam options. lam tasks.
+  recursive let findMaximumConstantFactor = lam state.
+    let wcets =
+      let tasks = map (lam t. {t with particles = muli state.k t.importance}) tasks in
+      if eqi state.upperBound defaultUpperBound then
+        runTasks options.systemPath options.runnerCmd tasks
+      else
+        -- NOTE(larshum, 2023-10-14): If we've found the upper bound, we make a
+        -- more careful evaluation by repeating the estimations three times and
+        -- taking the maximum WCET among the runs.
+        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
+        foldl
+          (lam acc. lam wcets.
+            mapMerge
+              (lam lhs. lam rhs.
+                match (lhs, rhs) with (Some l, Some r) then
+                  Some (maxi l r)
+                else error "Incompatible results from runTasks")
+              acc wcets)
+          (head res) (tail res)
+    in
+    let updState =
+      let wcets =
+        mapMerge
+          (lam l. lam r.
+            match (l, r) with (_, Some wcet) then
+              Some wcet
+            else
+              error "Missing worst-case execution time for task")
+          state.wcets wcets
+      in
+      {state with wcets = wcets}
+    in
+    let tasksPerCore =
+      foldl
+        (lam tasksPerCore. lam t.
+          let t =
+            match mapLookup t.id updState.wcets with Some budget then
+              {t with budget = maxi t.budget budget}
+            else
+              error (concat "Found no WCET for task " t.id)
+          in
+          match mapLookup t.core tasksPerCore with Some coreTasks then
+            mapInsert t.core (snoc coreTasks t) tasksPerCore
+          else
+            mapInsert t.core [t] tasksPerCore)
+        (mapEmpty subi) tasks
+    in
+    let tasksSchedulable =
+      mapFoldWithKey
+        (lam acc. lam. lam coreTasks.
+          if acc then schedulable coreTasks else false)
+        true tasksPerCore
+    in
+    if tasksSchedulable then
+      if geqi state.k (floorfi (mulf (int2float state.upperBound) options.budgetRatio)) then
+        updState
+      else
+        let k =
+          if eqi state.upperBound defaultUpperBound then
+            muli state.k 2
+          else
+            divi (addi state.k state.upperBound) 2
+        in
+        findMaximumConstantFactor {updState with k = k, prev = state.k}
+    else
+      let k = divi (addi state.k state.prev) 2 in
+      printLn (join ["Tasks not schedulable for k = ", int2string state.k]);
+      findMaximumConstantFactor {state with k = k, upperBound = state.k}
+  in
+  let initState =
+    {k = 1, upperBound = defaultUpperBound, wcets = mapEmpty cmpString, prev = 1}
+  in
+  findMaximumConstantFactor initState
 
 mexpr
 

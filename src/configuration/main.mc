@@ -110,7 +110,8 @@ let tasks = mergeSort (lam l. lam r. subi l.period r.period) tasks in
 let tasks = mapi (lam i. lam t. {t with index = i}) tasks in
 
 -- 1. Retrieve the task-to-core mapping from a file, or compute a mapping based
--- on a heuristic (for a given number of cores).
+-- on a heuristic (for a given number of cores). This step applies to both
+-- particle fairness and execution time fairness.
 let tasks = estimateBaseExecutionTime options tasks in
 print "Estimated the base execution time of each task:\n";
 iter
@@ -127,44 +128,87 @@ iter
   tasks;
 flushStdout ();
 
--- 2. Compute the execution time budgets. We either optimize for utilization
--- using a core-local view, or we optimize for fairness using a global view.
--- Also, we either measure the "base" execution time of all tasks to get an
--- estimate, or we start from (near) zero in the sensitivity analysis.
-let tasksPerCore : Map Int [TaskData] =
-  foldl
-    (lam acc. lam t.
-      match mapLookup t.core acc with Some tasks then
-        mapInsert t.core (snoc tasks t) acc
-      else
-        mapInsert t.core [t] acc)
-    (mapEmpty subi) tasks
-in
-let lambdas : Map Int Float =
-  mapMapWithKey (lam. lam coreTasks. computeLambda coreTasks) tasksPerCore
-in
-match min cmpFloat (mapValues lambdas) with Some minLambda in
-let tasks =
-  mapFoldWithKey
-    (lam acc. lam. lam coreTasks.
-      concat
-        (map
-          (lam t. {t with budget = addi t.budget (floorfi (mulf (int2float t.importance) minLambda))})
-          coreTasks)
-        acc)
-    [] tasksPerCore
-in
-print "Task execution time budgets:\n";
-iter
-  (lam t.
-    print (join [t.id, ": ", printNanosAsSeconds t.budget, "s\n"]))
-  tasks;
-flushStdout ();
+let confResult =
+  if options.particleFairness then
+    -- 2. Find a multiple k such that all tasks use particles equal to k times
+    -- their importance value. We return the resulting particle counts and
+    -- budgets assigned based on our WCET estimates, with an extra margin on top.
+    let state = configureTasksParticleFairness options tasks in
 
--- 3. Run the configuration using the assigned execution time budgets,
--- following the topology of the graph.
-printLn "Configuring the number of particles to use per task";
-let confResult = configureTasks options g tasks in
+    let tasksPerCore =
+      foldl
+        (lam acc. lam t.
+          let wcet =
+            optionGetOrElse (lam. error (join ["Could not find budget for task ", t.id]))
+                            (mapLookup t.id state.wcets)
+          in
+          let t = {t with budget = wcet, importance = wcet,
+                          particles = muli state.k t.importance}
+          in
+          match mapLookup t.core acc with Some tasks then
+            mapInsert t.core (snoc tasks t) acc
+          else
+            mapInsert t.core [t] acc)
+        (mapEmpty subi) tasks
+    in
+    let lambdas =
+      mapMapWithKey
+        (lam. lam coreTasks. computeLambda coreTasks)
+        tasksPerCore
+    in
+    match min cmpFloat (mapValues lambdas) with Some minLambda in
+    printLn (join ["k = ", int2string state.k]);
+    mapFoldWithKey
+      (lam acc. lam. lam coreTasks.
+        foldl
+          (lam acc. lam t.
+            let budget = addi t.budget (floorfi (mulf (int2float t.budget) minLambda)) in
+            snoc acc (t.id, t.particles, budget))
+          acc coreTasks)
+      [] tasksPerCore
+  else
+    -- 2. Compute the execution time budgets. We either optimize for utilization
+    -- using a core-local view, or we optimize for fairness using a global view.
+    -- Also, we either measure the "base" execution time of all tasks to get an
+    -- estimate, or we start from (near) zero in the sensitivity analysis.
+    let tasksPerCore : Map Int [TaskData] =
+      foldl
+        (lam acc. lam t.
+          match mapLookup t.core acc with Some tasks then
+            mapInsert t.core (snoc tasks t) acc
+          else
+            mapInsert t.core [t] acc)
+        (mapEmpty subi) tasks
+    in
+    let lambdas : Map Int Float =
+      mapMapWithKey
+        (lam. lam coreTasks. computeLambda coreTasks)
+        tasksPerCore
+    in
+    match min cmpFloat (mapValues lambdas) with Some minLambda in
+    let tasks =
+      mapFoldWithKey
+        (lam acc. lam. lam coreTasks.
+          concat
+            (map
+              (lam t. {t with budget = addi t.budget (floorfi (mulf (int2float t.importance) minLambda))})
+              coreTasks)
+            acc)
+        [] tasksPerCore
+    in
+    print "Task execution time budgets:\n";
+    iter
+      (lam t.
+        print (join [t.id, ": ", printNanosAsSeconds t.budget, "s\n"]))
+      tasks;
+    flushStdout ();
+
+    -- 3. Run the configuration using the assigned execution time budgets,
+    -- following the topology of the graph.
+    printLn "Configuring the number of particles to use per task";
+    configureTasksExecutionTimeFairness options g tasks
+in
+
 iter
   (lam e.
     match e with (taskId, particles, budget) in
@@ -176,6 +220,6 @@ print "Configuration complete!\nThe tasks have been assigned the following numbe
 
 iter
   (lam e.
-    match e with (taskId, particles) in
+    match e with (taskId, particles, _) in
     printLn (join [taskId, ": ", int2string particles]))
   confResult

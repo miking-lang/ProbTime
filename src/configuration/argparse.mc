@@ -7,12 +7,13 @@ type ConfigureOptions = {
   maxParticles : Int,
   systemPath : String,
   runnerCmd : String,
-  budgetRatio : Float
+  budgetRatio : Float,
+  particleFairness : Bool
 }
 
 let configureDefaultOptions = {
   numCores = 1, maxParticles = maxParticles, systemPath = ".", runnerCmd = "",
-  budgetRatio = 0.9
+  budgetRatio = 0.9, particleFairness = false
 }
 
 let optionsConfig = [
@@ -32,7 +33,10 @@ let optionsConfig = [
   , lam p. {p.options with runnerCmd = argToString p} ),
   ( [("--budget-ratio", " ", "<f>")]
   , "Specifies the ratio of the execution budgets to use (between zero and one) to control the margin of error"
-  , lam p. {p.options with budgetRatio = argToFloat p} )
+  , lam p. {p.options with budgetRatio = argToFloat p} ),
+  ( [("--particle-fairness", "", "")]
+  , "Consider fairness values in terms of particle count rather than execution time budgets"
+  , lam p. {p.options with particleFairness = true} )
 ]
 
 let printHelpMsgAndExit = lam.
