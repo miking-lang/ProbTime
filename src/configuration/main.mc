@@ -151,18 +151,19 @@ let confResult =
             mapInsert t.core [t] acc)
         (mapEmpty subi) tasks
     in
-    let lambdas =
-      mapMapWithKey
-        (lam. lam coreTasks. computeLambda coreTasks)
-        tasksPerCore
-    in
-    match min cmpFloat (mapValues lambdas) with Some minLambda in
     printLn (join ["k = ", int2string state.k]);
+    -- NOTE(larshum, 2023-10-15): After finding an integer k for which all
+    -- tasks are schedulable, we compute the budgets by extending all observed
+    -- WCETs proportionally. Note that we use the maximum lambda for each core,
+    -- so that tasks have as much time available as possible (to prevent
+    -- "overruns" because we allocated too small budgets even though we could
+    -- allocate more).
     mapFoldWithKey
       (lam acc. lam. lam coreTasks.
+        let lambda = computeLambda coreTasks in
         foldl
           (lam acc. lam t.
-            let budget = addi t.budget (floorfi (mulf (int2float t.budget) minLambda)) in
+            let budget = addi t.budget (floorfi (mulf (int2float t.budget) lambda)) in
             snoc acc (t.id, t.particles, budget))
           acc coreTasks)
       [] tasksPerCore

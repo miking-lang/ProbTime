@@ -277,29 +277,25 @@ let configureTasksParticleFairness = lam options. lam tasks.
   recursive let findMaximumConstantFactor = lam state.
     let wcets =
       let tasks = map (lam t. {t with particles = muli state.k t.importance}) tasks in
-      if eqi state.upperBound defaultUpperBound then
-        runTasks options.systemPath options.runnerCmd tasks
-      else
-        -- NOTE(larshum, 2023-10-14): If we've found the upper bound, we make a
-        -- more careful evaluation by repeating the estimations three times and
-        -- taking the maximum WCET among the runs.
-        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
-        foldl
-          (lam acc. lam wcets.
-            mapMerge
-              (lam lhs. lam rhs.
-                match (lhs, rhs) with (Some l, Some r) then
-                  Some (maxi l r)
-                else error "Incompatible results from runTasks")
-              acc wcets)
-          (head res) (tail res)
+      -- NOTE(larshum, 2023-10-14): We repeat the estimations three times and
+      -- taking the maximum WCET among the runs for each task.
+      let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
+      foldl
+        (lam acc. lam wcets.
+          mapMerge
+            (lam lhs. lam rhs.
+              match (lhs, rhs) with (Some l, Some r) then
+                Some (maxi l r)
+              else error "Incompatible results from runTasks")
+            acc wcets)
+        (head res) (tail res)
     in
     let updState =
       let wcets =
         mapMerge
           (lam l. lam r.
             match (l, r) with (_, Some wcet) then
-              Some wcet
+              Some (floorfi (divf (int2float wcet) options.budgetRatio))
             else
               error "Missing worst-case execution time for task")
           state.wcets wcets
@@ -328,7 +324,9 @@ let configureTasksParticleFairness = lam options. lam tasks.
         true tasksPerCore
     in
     if tasksSchedulable then
-      if geqi state.k (floorfi (mulf (int2float state.upperBound) options.budgetRatio)) then
+      -- NOTE(larshum, 2023-10-15): If we are sufficiently close to the upper
+      -- bound, we stop.
+      if geqi state.k (floorfi (mulf (int2float (subi state.upperBound 1)) 0.9)) then
         updState
       else
         let k =
