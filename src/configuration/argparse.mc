@@ -4,7 +4,6 @@ include "definitions.mc"
 
 type ConfigureOptions = {
   numCores : Int,
-  maxParticles : Int,
   systemPath : String,
   runnerCmd : String,
   budgetRatio : Float,
@@ -12,7 +11,7 @@ type ConfigureOptions = {
 }
 
 let configureDefaultOptions = {
-  numCores = 1, maxParticles = maxParticles, systemPath = ".", runnerCmd = "",
+  numCores = 1, systemPath = ".", runnerCmd = "",
   budgetRatio = 0.9, particleFairness = false
 }
 
@@ -20,11 +19,6 @@ let optionsConfig = [
   ( [("--num-cores", " ", "<n>")]
   , "Specifies the number of cores to use"
   , lam p. {p.options with numCores = argToInt p} ),
-  ( [("--max-particles", " ", "<n>")]
-  , join [
-      "An upper bound on the number of particles to use in an infer (default: ",
-      int2string maxParticles, ")"]
-  , lam p. {p.options with maxParticles = argToInt p} ),
   ( [("--path", " ", "<path>")]
   , "Sets the path to the directory where the ProbTime system files are stored"
   , lam p. {p.options with systemPath = argToString p} ),

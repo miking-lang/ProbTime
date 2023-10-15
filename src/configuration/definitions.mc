@@ -35,4 +35,3 @@ let defaultTaskData = {
 let systemSpecFile = "network.json"
 let taskToCoreMappingFile = "task-core-map.txt"
 let defaultParticles = 100
-let maxParticles = 7500
