@@ -20,7 +20,7 @@ struct file_buffer {
   int64_t sz;
 };
 
-const int64_t BUFFER_SIZE = 1<<20;
+const int64_t BUFFER_SIZE = 1<<22;
 
 std::map<int, file_buffer> buffers;
 
