@@ -221,6 +221,6 @@ print "Configuration complete!\nThe tasks have been assigned the following numbe
 
 iter
   (lam e.
-    match e with (taskId, particles, _) in
-    printLn (join [taskId, ": ", int2string particles]))
+    match e with (taskId, particles, budget) in
+    printLn (join [taskId, ": ", int2string particles, ", ", int2string budget]))
   confResult
