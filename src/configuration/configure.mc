@@ -19,7 +19,9 @@ let defaultUpperBound = floorfi 1e10
 
 let writeTaskConfig = lam path. lam task.
   let taskConfigFile = sysJoinPath path (concat task.id ".config") in
-  let msg = join [int2string task.particles, " ", int2string task.budget] in
+  -- NOTE(larshum, 2023-10-17): When configuring tasks, we always assume a
+  -- slowdown factor of 1, i.e., that we are replaying data in real-time.
+  let msg = join [int2string task.particles, " ", int2string task.budget, " 1"] in
   writeFile taskConfigFile msg
 
 let readTaskCollect = lam path. lam taskId.
