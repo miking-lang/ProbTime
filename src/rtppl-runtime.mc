@@ -69,11 +69,15 @@ let particleCount : Ref Int = ref 0
 let taskBudget : Ref Int = ref 0
 let taskExecTimes : Ref [Int] = ref []
 
+let slowdown : Ref Int = ref 1
+
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
 -- integer denoting the number of nanoseconds of overrun.
 let delayBy : Int -> Int = lam delay.
   let oldPriority = rtpplSetMaxPriority () in
+  let logicalIntervalTime = nanosToTimespec delay in
+  let delay = muli delay (deref slowdown) in
   let intervalTime = nanosToTimespec delay in
   let endTime = getMonotonicTime () in
   let elapsedTime = diffTimespec endTime (deref monoLogicalTime) in
@@ -87,7 +91,7 @@ let delayBy : Int -> Int = lam delay.
     else 0
   in
   modref monoLogicalTime waitTime;
-  modref wallLogicalTime (addTimespec (deref wallLogicalTime) intervalTime);
+  modref wallLogicalTime (addTimespec (deref wallLogicalTime) logicalIntervalTime);
   rtpplSetPriority oldPriority;
   overrun
 
@@ -179,7 +183,7 @@ let storeCollectedResults = lam taskId.
   let overran =
     let b = deref taskBudget in
     if lti b 0 then 0
-    else if gti wcet (deref taskBudget) then 1
+    else if gti wcet (muli (deref taskBudget) (deref slowdown)) then 1
     else 0
   in
   let data = map int2string (snoc execTimes overran) in
@@ -189,21 +193,22 @@ let rtpplReadConfigurationFile = lam taskId.
   let configFile = concat taskId ".config" in
   if fileExists configFile then
     match map string2int (strSplit " " (strTrim (readFile configFile)))
-    with [p, budget] in
-    Some (p, budget)
+    with [p, budget, slowdown] then
+      Some (p, budget, slowdown)
+    else
+      None ()
   else
     None ()
-
-let defaultParticles = 100
 
 let rtpplLoadConfiguration = lam taskId.
   match
     optionGetOrElse
-      (lam. (defaultParticles, 0))
+      (lam. (100, 0, 1))
       (rtpplReadConfigurationFile taskId)
-  with (nparticles, budget) in
+  with (nparticles, budget, slowd) in
   modref particleCount nparticles;
-  modref taskBudget budget
+  modref taskBudget budget;
+  modref slowdown slowd
 
 let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.
