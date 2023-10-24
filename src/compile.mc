@@ -522,19 +522,17 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     } in
     bindall_ [ inferModelBind, distBind ]
   | DegenerateRtpplStmt {info = info} ->
-    let neginf = TmApp {
-      lhs = TmApp {
-        lhs = TmConst {val = CDivf (), ty = _tyuk info, info = info},
-        rhs = TmApp {
-          lhs = TmConst {val = CNegf (), ty = _tyuk info, info = info},
-          rhs = TmConst {val = CFloat {val = 1.0}, ty = _tyuk info, info = info},
-          ty = _tyuk info, info = info},
-        ty = _tyuk info, info = info},
-      rhs = TmConst {val = CFloat {val = 0.0}, ty = _tyuk info, info = info},
-      ty = _tyuk info, info = info} in
+    -- NOTE(larshum, 2023-10-24): Instead of using negative infinity as the
+    -- weight, we use a small negative value. This ensures the weight is
+    -- unlikely to be greater than that of other particles. But more
+    -- importantly, it prevents a situation where all particles become
+    -- degenerate, which would be highly problematic.
+    let smallWeight = TmConst {
+      val = CFloat {val = negf 1e300}, ty = _tyuk info, info = info
+    } in
     TmLet {
       ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmWeight {weight = neginf, ty = _tyuk info, info = info},
+      body = TmWeight {weight = smallWeight, ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info }
   | ResampleRtpplStmt {info = info} ->
     TmLet {
