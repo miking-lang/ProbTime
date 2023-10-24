@@ -9,8 +9,8 @@ include "schedulable.mc"
 
 type TaskConfigState = {
   particles : Int,
-  observations : Map Int Int,
   budget : Int,
+  lowerBound : Int,
   upperBound : Int,
   finished : Bool
 }
@@ -95,18 +95,6 @@ let maxObsIntercept = lam slope. lam observations.
       maxf ofs maxOfs)
     0.0 observations
 
--- Add the worst-case execution times to the accumulated sequence of
--- observed worst-case execution times, coupled with the number of
--- particles used.
-let estimateNewParticles = lam options. lam task. lam obs.
-  match linearRegression (mapBindings obs) with (slope, intercept) in
-  let maxIntercept = maxObsIntercept slope obs in
-  let y = mulf (int2float task.budget) options.budgetRatio in
-  let p = floorfi (divf (subf y maxIntercept) slope) in
-  if leqi p 0 then 1
-  else if lti p task.upperBound then p
-  else subi task.upperBound 1
-
 let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
   recursive let work = lam g. lam state.
     let g =
@@ -128,9 +116,17 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
         (mapBindings state)
     else
       let wcets =
-        runTasks
-          options.systemPath options.runnerCmd
-          (tasksWithParticleCounts tasks state)
+        let twpc = tasksWithParticleCounts tasks state in
+        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd twpc) in
+        foldl
+          (lam acc. lam wcets.
+            mapMerge
+              (lam lhs. lam rhs.
+                match (lhs, rhs) with (Some l, Some r) then
+                  Some (maxi l r)
+                else error "Incompatible results from runTasks")
+              acc wcets)
+          (head res) (tail res)
       in
       -- NOTE(larshum, 2023-10-12): If a task we had already fixed the number
       -- of particles for overruns, we need to re-configure it and all tasks
@@ -142,20 +138,11 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
             match (mapLookup task.id state, mapLookup task.id wcets)
             with (Some ts, Some wcet) then
               if and ts.finished (gti wcet task.budget) then
-                let obs =
-                  mapInsertWith maxi ts.particles wcet ts.observations
-                in
                 printLn (join [
                   "Fixed task ", task.id, " overran; wcet=", int2string wcet,
                   ", budget=", int2string task.budget]);
-                let p =
-                  if geqi wcet task.period then
-                    divi ts.particles 2
-                  else
-                    estimateNewParticles options ts obs
-                in
-                let ts = {ts with particles = p, upperBound = ts.particles,
-                                  observations = obs, finished = false}
+                let ts = {ts with lowerBound = 1, upperBound = ts.particles,
+                                  finished = false}
                 in
                 (mapInsert task.id ts state, true)
               else acc
@@ -189,10 +176,7 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
             (lam state. lam taskId.
               if setMem taskId active then state
               else match mapLookup taskId state with Some taskState then
-                let ts =
-                  {taskState with finished = false,
-                                  observations = mapEmpty subi}
-                in
+                let ts = {taskState with lowerBound = 1, finished = false} in
                 mapInsert taskId ts state
               else state)
             state (digraphVertices g)
@@ -212,48 +196,25 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
         let state =
           mapFoldWithKey
             (lam state. lam taskId. lam wcet.
-              -- NOTE(larshum, 2023-09-25): If we get a WCET of 0, it means we
-              -- failed to read the collection file for some reason. Ignore the
-              -- result and re-run.
-              if eqi wcet 0 then state
-              else match mapLookup taskId state with Some task then
-                let obs =
-                  mapInsertWith maxi task.particles wcet task.observations
-                in
+              match mapLookup taskId state with Some task then
                 let task =
-                  if eqi (mapSize obs) 1 then
-                    {task with particles = 100, observations = obs}
-                  else if lti (mapSize obs) 5 then
-                    if lti wcet task.budget then
-                      -- NOTE(larshum, 2023-10-05): If the upper bound is at its
-                      -- default value we have not overran so far, so we double
-                      -- the number of particles. Otherwise, we pick a value
-                      -- between the last particle count and the upper bound.
-                      let np =
-                        if eqi task.upperBound defaultUpperBound then
-                          muli task.particles 2
-                        else
-                          divi (addi task.particles task.upperBound) 2
-                      in
-                      {task with particles = np, observations = obs}
-                    else
-                      -- NOTE(larshum, 2023-10-05): If the task overruns its
-                      -- budget, we do not record the new observation as it might
-                      -- not behave linearly, and therefore disturb our final
-                      -- estimation.
-                      let np = divi task.particles 2 in
-                      {task with particles = np, upperBound = task.particles}
-                  else
-                    if gti wcet (floorfi (mulf (int2float task.budget) options.budgetRatio)) then
-                      let task = {task with upperBound = task.particles} in
-                      let p = estimateNewParticles options task obs in
-                      {task with particles = p, observations = obs}
-                    else
-                      let p = estimateNewParticles options task obs in
-                      if gti p task.particles then
-                        {task with particles = p, observations = obs}
+                  if lti (addi task.lowerBound 1) task.upperBound then
+                    let safeBudget = floorfi (mulf (int2float task.budget) options.budgetRatio) in
+                    let task =
+                      if gti wcet safeBudget then
+                        {task with upperBound = task.particles}
                       else
-                        {task with finished = true, observations = obs}
+                        {task with lowerBound = task.particles}
+                    in
+                    let p =
+                      if eqi task.upperBound defaultUpperBound then
+                        muli task.lowerBound 2
+                      else
+                        divi (addi task.lowerBound task.upperBound) 2
+                    in
+                    {task with particles = p}
+                  else
+                    {task with particles = task.lowerBound, finished = true}
                 in
                 mapInsert taskId task state
               else error "Found WCET of invalid task, likely bug in configureTasks")
@@ -265,8 +226,8 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
     foldl
       (lam state. lam task.
         let taskState =
-          { particles = task.particles, observations = mapEmpty subi
-          , budget = task.budget, upperBound = defaultUpperBound
+          { particles = task.particles, budget = task.budget
+          , lowerBound = 1, upperBound = defaultUpperBound
           , finished = false }
         in
         mapInsert task.id taskState state)
@@ -277,74 +238,72 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
 
 let configureTasksParticleFairness = lam options. lam tasks.
   recursive let findMaximumConstantFactor = lam state.
-    let wcets =
-      let tasks = map (lam t. {t with particles = muli state.k t.importance}) tasks in
-      -- NOTE(larshum, 2023-10-14): We repeat the estimations three times and
-      -- taking the maximum WCET among the runs for each task.
-      let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
-      foldl
-        (lam acc. lam wcets.
-          mapMerge
-            (lam lhs. lam rhs.
-              match (lhs, rhs) with (Some l, Some r) then
-                Some (maxi l r)
-              else error "Incompatible results from runTasks")
-            acc wcets)
-        (head res) (tail res)
-    in
-    let updState =
-      let wcets =
-        mapMerge
-          (lam l. lam r.
-            match (l, r) with (_, Some wcet) then
-              Some (floorfi (divf (int2float wcet) options.budgetRatio))
-            else
-              error "Missing worst-case execution time for task")
-          state.wcets wcets
+    if lti (addi state.lowerBound 1) state.upperBound then
+      let k =
+        if eqi state.upperBound defaultUpperBound then
+          muli state.lowerBound 2
+        else
+          divi (addi state.lowerBound state.upperBound) 2
       in
-      {state with wcets = wcets}
-    in
-    let tasksPerCore =
-      foldl
-        (lam tasksPerCore. lam t.
-          let t =
-            match mapLookup t.id updState.wcets with Some budget then
-              {t with budget = maxi t.budget budget}
-            else
-              error (concat "Found no WCET for task " t.id)
-          in
-          match mapLookup t.core tasksPerCore with Some coreTasks then
-            mapInsert t.core (snoc coreTasks t) tasksPerCore
-          else
-            mapInsert t.core [t] tasksPerCore)
-        (mapEmpty subi) tasks
-    in
-    let tasksSchedulable =
-      mapFoldWithKey
-        (lam acc. lam. lam coreTasks.
-          if acc then schedulable coreTasks else false)
-        true tasksPerCore
-    in
-    if tasksSchedulable then
-      -- NOTE(larshum, 2023-10-15): If we are sufficiently close to the upper
-      -- bound, we stop.
-      if geqi state.k (floorfi (mulf (int2float (subi state.upperBound 1)) 0.9)) then
-        updState
-      else
-        let k =
-          if eqi state.upperBound defaultUpperBound then
-            muli state.k 2
-          else
-            divi (addi state.k state.upperBound) 2
+      let wcets =
+        let tasks = map (lam t. {t with particles = muli k t.importance}) tasks in
+        -- NOTE(larshum, 2023-10-14): We repeat the estimations three times and
+        -- taking the maximum WCET among the runs for each task.
+        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
+        foldl
+          (lam acc. lam wcets.
+            mapMerge
+              (lam lhs. lam rhs.
+                match (lhs, rhs) with (Some l, Some r) then
+                  Some (maxi l r)
+                else error "Incompatible results from runTasks")
+              acc wcets)
+          (head res) (tail res)
+      in
+      let updState =
+        let wcets =
+          mapMerge
+            (lam l. lam r.
+              match (l, r) with (_, Some wcet) then
+                Some (floorfi (divf (int2float wcet) options.budgetRatio))
+              else
+                error "Missing worst-case execution time for task")
+            state.wcets wcets
         in
-        findMaximumConstantFactor {updState with k = k, prev = state.k}
-    else
-      let k = divi (addi state.k state.prev) 2 in
-      printLn (join ["Tasks not schedulable for k = ", int2string state.k]);
-      findMaximumConstantFactor {state with k = k, upperBound = state.k}
+        {state with wcets = wcets}
+      in
+      let tasksPerCore =
+        foldl
+          (lam tasksPerCore. lam t.
+            let t =
+              match mapLookup t.id updState.wcets with Some budget then
+                {t with budget = maxi t.budget budget}
+              else
+                error (concat "Found no WCET for task " t.id)
+            in
+            match mapLookup t.core tasksPerCore with Some coreTasks then
+              mapInsert t.core (snoc coreTasks t) tasksPerCore
+            else
+              mapInsert t.core [t] tasksPerCore)
+          (mapEmpty subi) tasks
+      in
+      let tasksSchedulable =
+        mapFoldWithKey
+          (lam acc. lam. lam coreTasks.
+            if acc then schedulable coreTasks else false)
+          true tasksPerCore
+      in
+      let state =
+        if tasksSchedulable then
+          {updState with lowerBound = k}
+        else
+          {updState with upperBound = k}
+      in
+      findMaximumConstantFactor state
+    else state
   in
   let initState =
-    {k = 1, upperBound = defaultUpperBound, wcets = mapEmpty cmpString, prev = 1}
+    {lowerBound = 1, upperBound = defaultUpperBound, wcets = mapEmpty cmpString}
   in
   findMaximumConstantFactor initState
 

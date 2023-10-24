@@ -78,7 +78,7 @@ let confResult =
                             (mapLookup t.id state.wcets)
           in
           let t = {t with budget = wcet, importance = wcet,
-                          particles = muli state.k t.importance}
+                          particles = muli state.lowerBound t.importance}
           in
           match mapLookup t.core acc with Some tasks then
             mapInsert t.core (snoc tasks t) acc
@@ -86,7 +86,7 @@ let confResult =
             mapInsert t.core [t] acc)
         (mapEmpty subi) tasks
     in
-    printLn (join ["k = ", int2string state.k]);
+    printLn (join ["k = ", int2string state.lowerBound]);
     -- NOTE(larshum, 2023-10-15): After finding an integer k for which all
     -- tasks are schedulable, we compute the budgets by extending all observed
     -- WCETs proportionally. Note that we use the maximum lambda for each core,
