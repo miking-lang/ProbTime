@@ -132,7 +132,7 @@ lang Rtppl =
   sem buildTaskDppl options filepath =
   | ast ->
     let runtimeData = _rts () in
-    let dpplOpts = default in
+    let dpplOpts = {default with extractSimplification = "inline"} in
     let ast = mexprCompile dpplOpts runtimeData ast in
     buildTaskMExpr options filepath ast
 
