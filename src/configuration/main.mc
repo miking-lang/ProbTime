@@ -14,47 +14,6 @@ include "schedulable.mc"
 let cmpFloat : Float -> Float -> Int = lam l. lam r.
   if gtf l r then 1 else if ltf l r then negi 1 else 0
 
-let estimateBaseExecutionTime = lam options. lam tasks.
-  let tasks = map (lam t. {t with particles = 1}) tasks in
-  let wcets : Map String Int = runTasks options.systemPath options.runnerCmd tasks in
-  map
-    (lam t.
-      match mapLookup t.id wcets with Some wcet then
-        {t with budget = wcet}
-      else error (join ["Could not find WCET estimation for task ", t.id]))
-    tasks
-
-let findTaskAllocationHeuristic = lam numCores. lam tasks.
-  recursive let work : [[TaskData]] -> [TaskData] -> [[TaskData]] =
-    lam cores. lam tasks.
-    match tasks with [t] ++ tasks then
-      let lambdas =
-        mapi
-          (lam coreIdx. lam coreTasks.
-            let orderedTasks =
-              sort
-                (lam l. lam r. subi l.index r.index)
-                (cons t coreTasks)
-            in
-            (coreIdx, orderedTasks, computeLambda orderedTasks))
-          cores
-      in
-      match max (lam l. lam r. cmpFloat l.2 r.2) lambdas
-      with Some (coreIdx, orderedTasks, maxLambda) in
-      if gtf maxLambda 0.0 then
-        let cores = set cores coreIdx orderedTasks in
-        work cores tasks
-      else
-        error "Provided tasks are not schedulable with estimated base execution times"
-    else cores
-  in
-  let tasks = sort (lam l. lam r. subi r.importance l.importance) tasks in
-  let coreTaskMap : [[TaskData]] = work (create numCores (lam. [])) tasks in
-  foldli
-    (lam acc. lam coreIdx. lam tasks.
-      foldl (lam acc. lam t. mapInsert t.id (addi coreIdx 1) acc) acc tasks)
-    (mapEmpty cmpString) coreTaskMap
-
 let loadTaskToCoreMapping = lam options. lam tasks.
   let taskToCoreMap : Map String Int =
     let ttcFile = sysJoinPath options.systemPath taskToCoreMappingFile in
@@ -67,22 +26,9 @@ let loadTaskToCoreMapping = lam options. lam tasks.
         (mapEmpty cmpString)
         (strSplit "\n" (strTrim (readFile ttcFile)))
     else
-      if lti options.numCores 1 then
-        error "The number of cores options must be a positive integer"
-      else if eqi options.numCores 1 then
-        mapFromSeq cmpString (map (lam t. (t.id, t.core)) tasks)
-      else
-        -- NOTE(larshum, 2023-09-22): If the task-to-core map file does not
-        -- exist, and we're using more than one core, we use a heuristic to
-        -- find a mapping and create the task-to-core map file based on our
-        -- results.
-        let ttcMap = findTaskAllocationHeuristic options.numCores tasks in
-        let str =
-          strJoin "\n"
-            (map (lam b. join [b.0, " ", int2string b.1]) (mapBindings ttcMap))
-        in
-        writeFile ttcFile str;
-        ttcMap
+      error (join [
+        "The task-to-core mapping must be provided in a file '",
+        taskToCoreMappingFile, "'" ])
   in
   map
     (lam t.
@@ -109,17 +55,6 @@ match constructSystemDependencyGraph systemSpecJson with (tasks, g) in
 let tasks = mergeSort (lam l. lam r. subi l.period r.period) tasks in
 let tasks = mapi (lam i. lam t. {t with index = i}) tasks in
 
--- 1. Retrieve the task-to-core mapping from a file, or compute a mapping based
--- on a heuristic (for a given number of cores). This step applies to both
--- particle fairness and execution time fairness.
-let tasks = estimateBaseExecutionTime options tasks in
-print "Estimated the base execution time of each task:\n";
-iter
-  (lam t.
-    print (join [t.id, ": ", printNanosAsSeconds t.budget, "s\n"]))
-  tasks;
-flushStdout ();
-
 let tasks = loadTaskToCoreMapping options tasks in
 print "Using the following task-to-core mapping\n";
 iter
@@ -130,7 +65,7 @@ flushStdout ();
 
 let confResult =
   if options.particleFairness then
-    -- 2. Find a multiple k such that all tasks use particles equal to k times
+    -- 1. Find a multiple k such that all tasks use particles equal to k times
     -- their importance value. We return the resulting particle counts and
     -- budgets assigned based on our WCET estimates, with an extra margin on top.
     let state = configureTasksParticleFairness options tasks in
@@ -158,6 +93,10 @@ let confResult =
     -- so that tasks have as much time available as possible (to prevent
     -- "overruns" because we allocated too small budgets even though we could
     -- allocate more).
+    --
+    -- This step is not required for correctness. We use this to be able to
+    -- detect overruns at runtime, for debugging purposes (it should never be
+    -- able to happen in practice, given representative training data).
     mapFoldWithKey
       (lam acc. lam. lam coreTasks.
         let lambda = computeLambda coreTasks in
@@ -168,10 +107,8 @@ let confResult =
           acc coreTasks)
       [] tasksPerCore
   else
-    -- 2. Compute the execution time budgets. We either optimize for utilization
-    -- using a core-local view, or we optimize for fairness using a global view.
-    -- Also, we either measure the "base" execution time of all tasks to get an
-    -- estimate, or we start from (near) zero in the sensitivity analysis.
+    -- 1. Compute the execution time budgets. We optimize for fairness using a
+    -- global view, where we pick fair budgets for all tasks.
     let tasksPerCore : Map Int [TaskData] =
       foldl
         (lam acc. lam t.
@@ -214,7 +151,7 @@ iter
   (lam e.
     match e with (taskId, particles, budget) in
     let taskConfigFile = sysJoinPath options.systemPath (concat taskId ".config") in
-    let msg = join [int2string particles, " ", int2string budget] in
+    let msg = join [int2string particles, " ", int2string budget, " 1"] in
     writeFile taskConfigFile msg)
   confResult;
 print "Configuration complete!\nThe tasks have been assigned the following number of particles:\n";
