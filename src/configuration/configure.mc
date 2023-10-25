@@ -198,7 +198,11 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
             (lam state. lam taskId. lam wcet.
               match mapLookup taskId state with Some task then
                 let task =
-                  if lti (addi task.lowerBound 1) task.upperBound then
+                  -- NOTE(larshum, 2023-10-25): If a task is given a budget of
+                  -- zero, we mark it as finished immediately. We use this to
+                  -- "skip" configuration of tasks that perform no inference.
+                  if eqi task.budget 0 then {task with finished = true}
+                  else if lti (addi task.lowerBound 1) task.upperBound then
                     let safeBudget = floorfi (mulf (int2float task.budget) options.budgetRatio) in
                     let task =
                       if gti wcet safeBudget then
