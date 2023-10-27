@@ -418,8 +418,6 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
   -- distinct integer index.
   sem mapInfersToIndex : (Int, Map Info Int) -> RtpplStmt -> (Int, Map Info Int)
   sem mapInfersToIndex acc =
-  | LoopPlusStmtRtpplStmt {loop = l} ->
-    sfold_RtpplLoopStmt_RtpplStmt mapInfersToIndex acc l
   | InferRtpplStmt {info = info} ->
     match acc with (nextIdx, inferMap) in
     (addi nextIdx 1, mapInsert info nextIdx inferMap)
@@ -576,10 +574,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
       body = TmSdelay { e = compileRtpplExpr e, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
-  | LoopPlusStmtRtpplStmt {
-      id = loopVar, info = info,
-      loop = ForInRtpplLoopStmt {id = {v = id}, e = e, body = body}
-    } ->
+  | ForLoopRtpplStmt {id = {v = id}, e = e, upd = loopVar, body = body, info = info} ->
     match
       match loopVar with Some {v = lvid} then
         (lvid, _var info lvid)
@@ -604,7 +599,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
           rhs = tailExpr, ty = _tyuk info, info = info },
         rhs = compileRtpplExpr e, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
-  | LoopPlusStmtRtpplStmt {id = loopVar, loop = loopStmt, info = info} ->
+  | WhileLoopRtpplStmt {cond = cond, upd = loopVar, body = body, info = info} ->
     let loopId = nameSym "loopFn" in
     match
       match loopVar with Some {v = loopVarId} then
@@ -616,16 +611,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       lhs = _var info loopId, rhs = tailExpr, ty = _tyuk info, info = info
     } in
     let loopBody =
-      match
-        switch loopStmt
-        case InfLoopRtpplLoopStmt {body = body} then
-          (TmConst {val = CBool {val = true}, ty = _tyuk info, info = info}, body)
-        case WhileCondRtpplLoopStmt {cond = cond, body = body} then
-          (compileRtpplExpr cond, body)
-        case _ then
-          errorSingle [info] "Compilation not supported for this loop construct"
-        end
-      with (condExpr, body) in
+      let condExpr = compileRtpplExpr cond in
       TmMatch {
         target = condExpr,
         pat = PatBool {val = true, ty = _tyuk info, info = info},
@@ -637,10 +623,12 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       body = TmLam {
         ident = loopVarId, tyAnnot = _tyuk info, tyParam = _tyuk info,
         body = loopBody, ty = _tyuk info, info = info },
-      info = info } in
+      info = info
+    } in
     let resultBind = TmLet {
       ident = loopVarId, tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = recCall, inexpr = uunit_, ty = _tyuk info, info = info } in
+      body = recCall, inexpr = uunit_, ty = _tyuk info, info = info
+    } in
     TmRecLets {
       bindings = [recBind], inexpr = resultBind, ty = _tyuk info, info = info }
   | ConditionRtpplStmt {

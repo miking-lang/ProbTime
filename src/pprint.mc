@@ -139,29 +139,19 @@ lang RtpplPrettyPrint = RtpplAst
     join [pprintIndent indent, "write ", pprintRtpplExpr indent src, " to ", portId, delayStr]
   | SdelayRtpplStmt {e = e} ->
     join [pprintIndent indent, "sdelay ", pprintRtpplExpr indent e]
-  | LoopPlusStmtRtpplStmt {id = loopVar, loop = loopTerm, info = info} ->
-    let loopVarStr =
-      match loopVar with Some {v = loopVarId} then
-        concat "loop " (nameGetStr loopVarId)
-      else "loop"
-    in
+  | ForLoopRtpplStmt {id = {v = id}, e = e, upd = upd, body = body} ->
+    let updStr = pprintUpdateVar upd in
     let ii = pprintIndentIncrement indent in
-    match
-      switch loopTerm
-      case ForInRtpplLoopStmt {id = {v = id}, e = e, body = body} then
-        (join [" for ", nameGetStr id, " in ", pprintRtpplExpr indent e], body)
-      case InfLoopRtpplLoopStmt {body = body} then
-        ("", body)
-      case WhileCondRtpplLoopStmt {cond = cond, body = body} then
-        (join [" while ", pprintRtpplExpr indent cond], body)
-      case _ then
-        errorSingle [info] "Pretty-printer does not support this loop form"
-      end
-    with (loopHeaderStr, body) in
     join [
-      pprintIndent indent, loopVarStr, loopHeaderStr, " {\n",
-      strJoin "\n" (map (pprintRtpplStmt ii) body),
-      pprintNewline indent, "}" ]
+      pprintIndent indent, "for ", nameGetStr id, " in ",
+      pprintRtpplExpr indent e, updStr, " {\n",
+      strJoin "\n" (map (pprintRtpplStmt ii) body), pprintNewline indent, "}" ]
+  | WhileLoopRtpplStmt {cond = cond, upd = upd, body = body} ->
+    let updStr = pprintUpdateVar upd in
+    let ii = pprintIndentIncrement indent in
+    join [
+      pprintIndent indent, "while ", pprintRtpplExpr indent cond, " {\n",
+      strJoin "\n" (map (pprintRtpplStmt ii) body), pprintNewline indent, "}"]
   | IdentPlusStmtRtpplStmt {id = {v = id}, next = ReassignRtpplStmtNoIdent {proj = None _, e = e}} ->
     join [pprintIndent indent, nameGetStr id, " = ", pprintRtpplExpr indent e]
   | IdentPlusStmtRtpplStmt {id = {v = id}, next = ReassignRtpplStmtNoIdent {proj = Some {v = pid}, e = e}} ->
@@ -170,18 +160,19 @@ lang RtpplPrettyPrint = RtpplAst
     let ii = pprintIndentIncrement indent in
     join [pprintIndent indent, nameGetStr id, "(",
           strJoin ", " (map (pprintRtpplExpr ii) args), ")"]
-  | ConditionRtpplStmt {id = condVar, cond = cond, thn = thn, els = els} ->
-    let condVarStr =
-      match condVar with Some {v = condVarId} then
-        concat "cond " (nameGetStr condVarId)
-      else "cond"
-    in
+  | ConditionRtpplStmt {id = upd, cond = cond, thn = thn, els = els} ->
+    let updStr = pprintUpdateVar upd in
     let ii = pprintIndentIncrement indent in
-    join [pprintIndent indent, condVarStr, " if ", pprintRtpplExpr indent cond,
-          " {\n", strJoin "\n" (map (pprintRtpplStmt ii) thn),
+    join [pprintIndent indent, " if ", pprintRtpplExpr indent cond,
+          updStr, " {\n", strJoin "\n" (map (pprintRtpplStmt ii) thn),
           pprintNewline indent, "} else {\n",
           strJoin "\n" (map (pprintRtpplStmt ii) els),
           pprintNewline indent, "}"]
+
+  sem pprintUpdateVar : Option {v : Name, i : Info} -> String
+  sem pprintUpdateVar =
+  | Some {v = id} -> concat "update " (nameGetStr id)
+  | None _ -> ""
 
   sem pprintRtpplExpr : Int -> RtpplExpr -> String
   sem pprintRtpplExpr indent =

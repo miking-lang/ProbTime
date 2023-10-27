@@ -53,7 +53,9 @@ lang RtpplTaskPeriod = RtpplAst
   -- defined in a particular shape, to simplify our analysis.
   sem findTaskTemplatePeriod : Info -> [RtpplStmt] -> RtpplExpr
   sem findTaskTemplatePeriod info =
-  | _ ++ [LoopPlusStmtRtpplStmt {loop = InfLoopRtpplLoopStmt {body = body}, info = info}] ->
+  | _ ++ [WhileLoopRtpplStmt {
+      cond = LiteralRtpplExpr {const = LitBoolRtpplConst {value = {v = true}}},
+      body = body, info = info}] ->
     match findLoopPeriod info (None ()) body with Some periodExpr then
       periodExpr
     else errorSingle [info] "Task template main loop is not periodic"
@@ -129,8 +131,6 @@ lang RtpplTaskInfers = RtpplAst
 
   sem collectStatementInfers : (Int, Map Info Int) -> RtpplStmt -> (Int, Map Info Int)
   sem collectStatementInfers acc =
-  | LoopPlusStmtRtpplStmt {loop = l} ->
-    sfold_RtpplLoopStmt_RtpplStmt collectStatementInfers acc l
   | InferRtpplStmt {info = info} ->
     match acc with (nextIdx, env) in
     (addi nextIdx 1, mapInsert info nextIdx env)

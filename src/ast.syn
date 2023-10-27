@@ -8,7 +8,6 @@ type RtpplProgram
 type RtpplTop
 type RtpplTopParams
 type RtpplStmt
-type RtpplLoopStmt
 type RtpplStmtNoIdent
 type RtpplExpr {grouping = "(" ")", }
 type RtpplExprNoIdent
@@ -108,13 +107,9 @@ prod Read : RtpplStmt = "read" port:LIdent "to" (dst:LName ("." proj:LIdent)?)
 prod Write : RtpplStmt = "write" src:RtpplExpr "to" port:LIdent ("offset" delay:RtpplExpr)?
 prod Sdelay : RtpplStmt = "delay" e:RtpplExpr
 prod Condition : RtpplStmt =
-  "cond" id:LName? "if" cond:RtpplExpr "{" thn:RtpplStmt* "}" "else" "{" els:RtpplStmt* "}"
-prod LoopPlusStmt : RtpplStmt = "loop" id:LName? loop:RtpplLoopStmt
-
--- NOTE(larshum, 2023-03-06): Grammar workarounds to make it LL(1).
-prod ForIn : RtpplLoopStmt = "for" id:LName "in" e:RtpplExpr "{" body:RtpplStmt* "}"
-prod InfLoop : RtpplLoopStmt = "{" body:RtpplStmt* "}"
-prod WhileCond : RtpplLoopStmt = "while" cond:RtpplExpr "{" body:RtpplStmt* "}"
+  "if" cond:RtpplExpr ("update" id:LName)? "{" thn:RtpplStmt* "}" "else" "{" els:RtpplStmt* "}"
+prod ForLoop : RtpplStmt = "for" id:LName "in" e:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
+prod WhileLoop : RtpplStmt = "while" cond:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
 
 prod IdentPlusStmt : RtpplStmt = id:LName next:RtpplStmtNoIdent
 prod Reassign : RtpplStmtNoIdent = ("." proj:LIdent)? "=" e:RtpplExpr
