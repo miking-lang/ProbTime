@@ -1,54 +1,63 @@
 # ProbTime
 
-ProbTime is a real-time probabilistic programming language. Using ProbTime, you can easily define probabilistic models that reason about timing aspects.
+ProbTime is a real-time probabilistic programming language (RTPPL). Using ProbTime, you can easily define probabilistic models that reason about timing aspects.
 
 ## Installing
 
-Before installing the ProbTime compiler, `rtppl` (Real-Time Probabilistic Programming Language), you need to install Miking and Miking DPPL. In addition, you need to configure the `MCORE_LIBS` variable such that it includes the paths to the Miking and Miking DPPL standard libraries:
+Before installing the ProbTime compiler, `rtppl` (Real-Time Probabilistic Programming Language), you need to install [Miking](https://github.com/miking-lang/miking/) and [Miking DPPL](https://github.com/miking-lang/miking-dppl). In addition, you need to configure the `MCORE_LIBS` variable such that it includes the paths to the Miking and Miking DPPL standard libraries:
 ```
 MCORE_LIBS="stdlib=/path/to/Miking/stdlib:coreppl=/path/to/coreppl/stdlib"
 ```
 
-You can then install the ProbTime compiler by running `make install` at the root of this repository. This results in
-
-* The ProbTime compiler binary `rtppl` being placed at `$(HOME)/.local/bin`
-* The source files under `src/` being placed at `$(HOME)/.local/src/rtppl/`
-* The RTPPL support library being installed as an OPAM library (in the current switch)
-
-Run `make uninstall` to undo the above changes.
+Following the above installations, you can install the ProbTime compiler by running `make install` at the root of this repository. This installs the ProbTime compiler `rtppl` and the configuration binary `rtppl-configure` (ensure that `$(HOME)/.local/bin` is in your path). Run `make uninstall` to undo the installation.
 
 ## Overview
 
-A ProbTime program defines a system of tasks which can interact with each other as well as external code. The compiler produces an executable for each task defined in the program, which can be distributed arbitrarily across different nodes. We assume the existence of an underlying system which handles the data transfer between task executables. Because of this assumption, the executables are platform agnostic - we can run a task on different nodes without having to recompile the ProbTime program.
-
-Using sensors and actuators, a ProbTime program can interact with external code. A sensor provides input from an external source to one or more ProbTime tasks, while an actuator propagates output from a ProbTime task to an external destination. The messages passed through these consist of a timestamp and a payload.
+A ProbTime program defines a system of tasks which can interact with each other. The ProbTime compiler produces an executable for each task defined in the ProbTime program. Tasks communicate with each other via ports using messages (timestamped values). When a task writes data to an output port, it is sent to all connected input ports (≥ 1). When a task reads from an input port, which may only receive data from one output port, it receives a sequence of newly arrived messages. Tasks can also communicate with external code using sensors (treated as an output port) and actuators (treated as an input port). A sensor provides input from an external source to one or more ProbTime tasks. An actuator propagates output from a ProbTime task to an external destination.
 
 ### Program structure
 
-A ProbTime program consists of a series of top-level definitions followed by a network system specification. In the top-level definitions, we define task templates from which we later define the tasks, as well as probabilistic models and regular functions that the templates can make use of. The system specification consists of three parts, which must be defined in the stated order:
-
-1. External sensor inputs and actuator outputs, giving them a name as well as a type of their payload.
-2. Task definitions in terms of previously defined task templates.
-3. Declaration of how tasks, sensors, and actuators are connected with each other.
+A ProbTime program consists of a series of top-level definitions followed by a system specification. We support three kinds of top-level definitions:
+* Task templates (`template`) which we use in the system specification to instantiate tasks. The templates can take arguments, allowing us to reuse them for instantiating multiple similar tasks (e.g., sensors on different positions on a car). Inside templates, we can specify delays (`delay`) and perform inference on probabilistic models (`infer`).
+* Probabilistic models (`model`) from which we can infer distributions. We can only use `sample`, `observe`, and `resample` inside a probabilistic model.
+* Function definitions (`def`) in which we can perform arbitrary computations. These functions can be used by templates and probabilistic models.
 
 ### Examples
 
-For concrete examples of how to write and use ProbTime programs, we refer to the `examples/` directory.
+For concrete examples of ProbTime programs, we refer to the `examples` directory.
+
+### Configuration
+
+Prior to running the configuration, we need to compile the ProbTime program by passing it to the `rtppl` command. Next, we need to specify a task-to-core mapping for each task. We do this by listing the tasks and the core index they are mapped to (we assume tasks run exclusively on a single core) in a file `task-core-map.txt`. The concrete examples show how to do this.
+
+Each task may perform inference using probabilistic models. However, you don't have to specify how to perform inference. We perform Sequential Monte Carlo (SMC) under the hood. We provide the `rtppl-configure` binary to determine how many particles to use in each inference. It takes a runner command, with which to run all tasks (providing pre-recorded data), and repeatedly runs the tasks to find a fair allocation of execution times or number of particles (if `--particle-fairness` is specified), based on how important tasks are and based on the worst-case execution times (WCETs) it finds.
+
+After the configuration, each task `t` will have a configuration file `t.config` specifying the number of particles to use, the maximum CPU execution time to use (used to detect and report overruns), and the slowdown factor (used for simulation purposes). You can manually create the configuration files to avoid having to run the configuration.
+
+### Limitations
+
+Currently, we assume each task consists of an initialization (any number of finite statements) followed by an infinite loop (`while true { ... }`). Due to how our configuration works, we further assume that:
+1. The infinite loop contains exactly one use of `delay` with a fixed argument (i.e., we assume tasks are periodic).
+2. The infinite loop contains at most one use of `infer`. This inference is the one for which we control the number of particles. All uses of `infer` in the initialization use a fixed number of particles (currently, 100).
+
+ProbTime currently only works on Linux. We assume tasks run exclusively on a single core (e.g., by using `taskset`), which is currently not supported on MacOS.
 
 ## External behavior
 
 In this part, we provide necessary information for defining an underlying platform for relaying messages between ProbTime tasks as well as external code interacting with ProbTime tasks via sensors and actuators.
 
-For each task defined in the ProbTime program, our compiler produces one executable named after the task. In addition, for each input and output port of the task, the compiler will produce a file. For example, if we compile a program defining task `abc` with input port `in1` and output port `out1` the compiler will emit an executable `abc` and two files `abc-in1` and `abc-out1`. The compiler also generates a system specification file in a JSON format, called `network.json`. This file declares the names of the `tasks` defined in the program, as well as the `sensors` and `actuators`. In addition, it defines the `connections` based on the system specification. For example, if we declare the input from a sensor `x` to be passed to the input port `in1` of task `abc`, the `connections` list contains an entry `{"from": "x", "to": "abc-in1"}`.
+All connections between tasks are listed in the `connections` list of the `network.json` file containing a JSON encoding of the system specification. For each input port of a task, the compiler creates a shared memory object (`shm_open`) with memory mapping (`mmap`) using a buffer size of `2^22` (hard-coded for now). Assume we have a task `A` with an input port `in`. If the connected output port belongs to another task, then it will write directly to a shared memory object called `A-in`. Otherwise, if the output port is a sensor, the underlying platform is responsible for writing to it using a correct format.
 
-The binary format of a message is as follows. The first 64 bits encode the size of the remaining part of the message. We use this as certain kinds of data (distributions) may vary in size. The following 64 bits encode the timestamp associated with the message and the remaining part consists of the payload (containing `size - 8` bytes of data). Currently, the compiler supports two kinds of data.
+The binary format of each message starts with a 64-bit size (for the timestamp and the payload). We use this as distributions may vary in size. Next, we encode the 64-bit timestamp (an absolute value). Finally, the remaining part of the message consists of the payload (of length `size - 8` bytes). Currently, the compiler only has support for a few specific kinds of data. For a comprehensive example using this in practice via a Python implementation, see [this repo](https://github.com/larshum/rtppl-experiments).
 
-### Floats
+### Numerical Values
 
-A floating-point number (`Float`) is encoded as a 64-bit number.
+We support sending integer (`Int`) and floating-point (`Float`) numerical values, both represented using 64-bits of data.
+
+### Records
+
+We support records of integers and distributions of records of floats. Each element of a record is encoded as described above. We store the values in shortlex order (ordered by length and alphabetically among strings of the same length) of the record labels. For example, a record `{aa: Int, x : Int, y : Int}` would be encoded such that the value of `x` comes first, followed by `y`, and ending with `aa`.
 
 ### Distributions
 
-We support encoding empirical distributions over floating-point numbers or records of floating-point numbers, e.g., `Dist(Float)` or `Dist(Pos)` where `Pos` is an alias for a record `{x : Float, y : Float}`.
-
-An empirical distribution consists of a finite number of particles, each of which has a weight and a value. We encode the particles of the distribution one by one. Each particle starts with a 64-bit floating-point number encoding its weight. If the data of the particles are floats, we simply encode them as 64-bit numbers. Otherwise, if the data is a record type consisting only of floating-point numbers, these are laid out as 64-bit floating-point numbers in memory based on the shortlex order of the labels (sorted first by length and then lexicographically among those with the same length).
+We support encoding empirical distrbutions over records of floating-point values. An empirical distribution consists of a finite number of particles, each consisting of a weight and data (either a record of floats or a float). We encode each particle in sequence, starting with its 64-bit floating-point weight followed by its data. Based on the message size and knowledge of what type of data is being sent, we can compute the number of particles from the message size.
