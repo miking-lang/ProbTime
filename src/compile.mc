@@ -471,20 +471,20 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
   sem compileRtpplStmt : RtpplTopEnv -> RtpplStmt -> Expr
   sem compileRtpplStmt env =
   | BindingRtpplStmt {id = {v = id}, ty = ty, e = e, info = info} ->
-    let tyBody =
+    let tyAnnot =
       match ty with Some ty then compileRtpplType ty
       else TyUnknown {info = info}
     in
     let body = compileRtpplExpr e in
     TmLet {
-      ident = id, tyAnnot = _tyuk info, tyBody = tyBody, body = body,
+      ident = id, tyAnnot = tyAnnot, tyBody = _tyuk info, body = body,
       inexpr = uunit_, ty = _tyuk info, info = info }
   | ObserveRtpplStmt {e = e, d = d, info = info} ->
     let obsExpr = TmObserve {
       value = compileRtpplExpr e, dist = compileRtpplExpr d,
       ty = _tyuk info, info = info } in
     TmLet {
-      ident = nameNoSym "", tyAnnot = _tyunit info, tyBody = _tyunit info,
+      ident = nameNoSym "", tyAnnot = _tyunit info, tyBody = _tyuk info,
       body = obsExpr, inexpr = uunit_, ty = _tyuk info, info = info }
   | AssumeRtpplStmt {id = {v = id}, d = d, info = info} ->
     TmLet {
@@ -512,9 +512,10 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       inexpr = uunit_, ty = _tyuk info, info = info
     } in
     let distBind = TmLet {
-      ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
+      ident = id, tyAnnot = TyDist {ty = _tyuk info, info = info},
+      tyBody = _tyuk info,
       body = TmApp {
-        lhs = _unsafe (_var info inferFuncId),
+        lhs = _var info inferFuncId,
         rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info
     } in
@@ -529,12 +530,12 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       val = CFloat {val = negf 1e300}, ty = _tyuk info, info = info
     } in
     TmLet {
-      ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      ident = nameNoSym "", tyAnnot = _tyunit info, tyBody = _tyuk info,
       body = TmWeight {weight = smallWeight, ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info }
   | ResampleRtpplStmt {info = info} ->
     TmLet {
-      ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      ident = nameNoSym "", tyAnnot = _tyunit info, tyBody = _tyuk info,
       body = TmResample {ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info }
   -- NOTE(larshum, 2023-04-17): We introduce an intermediate Expr node for
