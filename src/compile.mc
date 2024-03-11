@@ -336,7 +336,7 @@ lang RtpplCompileType = RtpplCompileBase + DPPLParser
     let appArg = lam acc. lam arg.
       TyApp { lhs = acc, rhs = compileRtpplType arg, info = info }
     in
-    foldl appArg (TyCon {ident = id, info = info}) args
+    foldl appArg (TyCon {ident = id, info = info, data = TyUnknown {info = info}}) args
   | RecordRtpplType {fields = fields, info = info} ->
     let toMExprField = lam field.
       match field with {id = {v = id}, ty = ty} in
