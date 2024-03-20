@@ -5,12 +5,12 @@ include "definitions.mc"
 type ConfigureOptions = {
   systemPath : String,
   runnerCmd : String,
-  budgetRatio : Float,
+  safetyMargin : Float,
   particleFairness : Bool
 }
 
 let configureDefaultOptions = {
-  systemPath = ".", runnerCmd = "", budgetRatio = 0.9, particleFairness = false
+  systemPath = ".", runnerCmd = "", safetyMargin = 0.8, particleFairness = false
 }
 
 let optionsConfig = [
@@ -20,9 +20,9 @@ let optionsConfig = [
   ( [("--runner", " ", "<cmd>")]
   , "Sets the command used to run the whole ProbTime system (required)"
   , lam p. {p.options with runnerCmd = argToString p} ),
-  ( [("--budget-ratio", " ", "<f>")]
-  , "Specifies the ratio of the execution budgets to use (between zero and one) to control the margin of error"
-  , lam p. {p.options with budgetRatio = argToFloat p} ),
+  ( [("--safety-margin", " ", "<f>")]
+  , "Specifies the safety margin ratio to determine the ratio of execution time that is used"
+  , lam p. {p.options with safetyMargin = argToFloat p} ),
   ( [("--particle-fairness", "", "")]
   , "Consider fairness values in terms of particle count rather than execution time budgets"
   , lam p. {p.options with particleFairness = true} )

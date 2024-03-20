@@ -203,7 +203,7 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
                   -- "skip" configuration of tasks that perform no inference.
                   if eqi task.budget 0 then {task with finished = true}
                   else if lti (addi task.lowerBound 1) task.upperBound then
-                    let safeBudget = floorfi (mulf (int2float task.budget) options.budgetRatio) in
+                    let safeBudget = floorfi (mulf (int2float task.budget) options.safetyMargin) in
                     let task =
                       if gti wcet safeBudget then
                         {task with upperBound = task.particles}
@@ -269,7 +269,7 @@ let configureTasksParticleFairness = lam options. lam tasks.
           mapMerge
             (lam l. lam r.
               match (l, r) with (_, Some wcet) then
-                Some (floorfi (divf (int2float wcet) options.budgetRatio))
+                Some (floorfi (divf (int2float wcet) options.safetyMargin))
               else
                 error "Missing worst-case execution time for task")
             state.wcets wcets
