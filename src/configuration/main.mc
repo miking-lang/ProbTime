@@ -103,6 +103,11 @@ let confResult =
     -- able to happen in practice, given representative training data).
     mapFoldWithKey
       (lam acc. lam. lam coreTasks.
+        -- NOTE(larshum, 2024-03-22): We set the importance of each task to its
+        -- budget, so that the budgets are scaled proportionally.
+        let coreTasks =
+          map (lam t. {t with importance = int2float t.budget}) coreTasks
+        in
         let lambda = computeLambda coreTasks in
         foldl
           (lam acc. lam t.

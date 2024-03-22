@@ -321,7 +321,6 @@ let configureTasksParticleFairness = lam options. lam tasks.
     let initState =
       {lowerBound = ceilfi lb, upperBound = defaultUpperBound, wcets = mapEmpty cmpString}
     in
-    printLn (join ["starting with lower bound k = ", float2string lb]);
     findMaximumConstantFactor initState
   else
     error "Cannot configure an empty list of tasks"
