@@ -137,7 +137,10 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
             match acc with (state, overran) in
             match (mapLookup task.id state, mapLookup task.id wcets)
             with (Some ts, Some wcet) then
-              if and ts.finished (gti wcet task.budget) then
+              -- NOTE(larshum, 2024-03-20): A task has budget zero if its
+              -- importance is zero. In this case, we ignore any overruns as
+              -- these tasks are irrelevant to the configuration.
+              if and (gti task.budget 0) (and ts.finished (gti wcet task.budget)) then
                 printLn (join [
                   "Fixed task ", task.id, " overran; wcet=", int2string wcet,
                   ", budget=", int2string task.budget]);
