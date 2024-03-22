@@ -6,11 +6,13 @@ type ConfigureOptions = {
   systemPath : String,
   runnerCmd : String,
   safetyMargin : Float,
+  executionTimeFairness : Bool,
   particleFairness : Bool
 }
 
 let configureDefaultOptions = {
-  systemPath = ".", runnerCmd = "", safetyMargin = 0.8, particleFairness = false
+  systemPath = ".", runnerCmd = "", safetyMargin = 0.8,
+  executionTimeFairness = false, particleFairness = false
 }
 
 let optionsConfig = [
@@ -23,8 +25,11 @@ let optionsConfig = [
   ( [("--safety-margin", " ", "<f>")]
   , "Specifies the safety margin ratio to determine the ratio of execution time that is used"
   , lam p. {p.options with safetyMargin = argToFloat p} ),
+  ( [("--execution-time-fairness", "", "")]
+  , "Consider importance values in terms of execution time"
+  , lam p. {p.options with executionTimeFairness = true} ),
   ( [("--particle-fairness", "", "")]
-  , "Consider fairness values in terms of particle count rather than execution time budgets"
+  , "Consider importance values in terms of particle count"
   , lam p. {p.options with particleFairness = true} )
 ]
 
@@ -42,6 +47,12 @@ let parseConfigureOptions : () -> ConfigureOptions = lam.
   match result with ParseOK r then
     let o = r.options in
     if null o.runnerCmd then
+      printHelpMsgAndExit ()
+    else if xnor o.executionTimeFairness o.particleFairness then
+      print (join [
+        "Error: Use either --execution-time-fairness or --particle-fairness to ",
+        "choose fairness approach\n\n"
+      ]);
       printHelpMsgAndExit ()
     else o
   else argPrintError result; exit 1
