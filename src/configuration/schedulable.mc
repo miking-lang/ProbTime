@@ -12,7 +12,7 @@ let getExecTime = lam tasks. lam i.
 
 let schedulingPoints = lam tasks. lam i.
   recursive let work = lam i. lam t.
-    if lti i 0 then setOfSeq subi [t]
+    if lti i 0 then setOfSeq cmpFloat [int2float t]
     else
       let periodi = getPeriod tasks i in
       setUnion
@@ -38,9 +38,9 @@ let schedulable : [TaskData] -> Bool = lam tasks.
                   (lam j.
                     let periodj = getPeriod tasks j in
                     let execj = getExecTime tasks j in
-                    muli (ceilfi (divf (int2float t) (int2float periodj))) execj)
+                    muli (ceilfi (divf t (int2float periodj))) execj)
               in
-              if leqi (foldl addi execi inner) t then true
+              if leqf (int2float (foldl addi execi inner)) t then true
               else false)
           false
           (schedulingPoints tasks i)
@@ -52,8 +52,8 @@ let dotProduct = lam lhs. lam rhs.
   foldl
     (lam acc. lam e.
       match e with (l, r) in
-      addi acc (muli l r))
-    0
+      addf acc (mulf l r))
+    0.0
     (zip lhs rhs)
 
 let computeLambda : [TaskData] -> Float = lam tasks.
@@ -67,15 +67,15 @@ let computeLambda : [TaskData] -> Float = lam tasks.
             (create i
               (lam j.
                 let tj = getPeriod tasks j in
-                ceilfi (divf (int2float t) (int2float tj))))
-            1
+                int2float (ceilfi (divf t (int2float tj)))))
+            1.0
         in
-        let ci = create (addi i 1) (lam j. getExecTime tasks j) in
+        let ci = create (addi i 1) (lam j. int2float (getExecTime tasks j)) in
         let di = subsequence d 0 (addi i 1) in
         let schedules =
           map
-            (lam t. divf (int2float (subi t (dotProduct (ni t) ci)))
-                         (int2float (dotProduct (ni t) di)))
+            (lam t. divf (subf t (dotProduct (ni t) ci))
+                         (dotProduct (ni t) di))
             (schedulingPoints tasks i)
         in
         match max (cmpfApprox 0.0) schedules with Some v in

@@ -1,3 +1,4 @@
+include "argparse.mc"
 include "ast.mc"
 include "pprint.mc"
 include "src-loc.mc"

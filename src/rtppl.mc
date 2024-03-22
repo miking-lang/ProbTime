@@ -50,7 +50,7 @@ lang RtpplJson = RtpplAst + RtpplTaskData
     let mapping = [
       ("id", JsonString (nameGetStr id)),
       ("period", JsonInt period),
-      ("importance", JsonInt priority)
+      ("importance", JsonFloat priority)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 

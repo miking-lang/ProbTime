@@ -27,7 +27,7 @@ let deserializeTasks : JsonValue -> [TaskData] = lam tasks.
       Some { defaultTaskData with
                id = jsonUnwrap (jsonDeserializeString (jsonLookup "id" kvs)),
                period = jsonUnwrap (jsonDeserializeInt (jsonLookup "period" kvs)),
-               importance = jsonUnwrap (jsonDeserializeInt (jsonLookup "importance" kvs)) }
+               importance = jsonUnwrap (jsonDeserializeFloat (jsonLookup "importance" kvs)) }
     else jsonFail ()
   in
   jsonUnwrap (jsonDeserializeSeq deserializeTask tasks)

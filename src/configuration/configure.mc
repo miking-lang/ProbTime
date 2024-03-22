@@ -253,7 +253,9 @@ let configureTasksParticleFairness = lam options. lam tasks.
           divi (addi state.lowerBound state.upperBound) 2
       in
       let wcets =
-        let tasks = map (lam t. {t with particles = muli k t.importance}) tasks in
+        let tasks =
+          map (lam t. {t with particles = floorfi (mulf (int2float k) t.importance)}) tasks
+        in
         -- NOTE(larshum, 2023-10-14): We repeat the estimations three times and
         -- taking the maximum WCET among the runs for each task.
         let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
@@ -309,10 +311,20 @@ let configureTasksParticleFairness = lam options. lam tasks.
       findMaximumConstantFactor state
     else state
   in
-  let initState =
-    {lowerBound = 1, upperBound = defaultUpperBound, wcets = mapEmpty cmpString}
+  -- NOTE(larshum, 2024-03-22): We compute the lower bound as the lowest
+  -- initial value for which all tasks are allocated at least one particle.
+  let minK = lam t.
+    if eqf t.importance 0.0 then 0.0
+    else divf 1.0 t.importance
   in
-  findMaximumConstantFactor initState
+  match max cmpFloat (map minK tasks) with Some lb then
+    let initState =
+      {lowerBound = ceilfi lb, upperBound = defaultUpperBound, wcets = mapEmpty cmpString}
+    in
+    printLn (join ["starting with lower bound k = ", float2string lb]);
+    findMaximumConstantFactor initState
+  else
+    error "Cannot configure an empty list of tasks"
 
 mexpr
 

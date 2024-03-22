@@ -11,9 +11,6 @@ include "definitions.mc"
 include "json-parse.mc"
 include "schedulable.mc"
 
-let cmpFloat : Float -> Float -> Int = lam l. lam r.
-  if gtf l r then 1 else if ltf l r then negi 1 else 0
-
 let loadTaskToCoreMapping = lam options. lam tasks.
   let taskToCoreMap : Map String Int =
     let ttcFile = sysJoinPath options.systemPath taskToCoreMappingFile in
@@ -65,9 +62,15 @@ flushStdout ();
 
 let confResult =
   if options.particleFairness then
+    -- NOTE(larshum, 2024-03-22): We normalize the importance values of the tasks
+    -- to ensure we only consider the relative importance among tasks when deciding
+    -- how to allocate particles.
+    let tasks = normalizeImportance tasks in
+
     -- 1. Find a multiple k such that all tasks use particles equal to k times
-    -- their importance value. We return the resulting particle counts and
-    -- budgets assigned based on our WCET estimates, with an extra margin on top.
+    -- their (normalized) importance value. We return the resulting particle
+    -- counts and budgets assigned based on our WCET estimates, with an extra
+    -- margin on top.
     let state = configureTasksParticleFairness options tasks in
 
     let tasksPerCore =
@@ -77,8 +80,9 @@ let confResult =
             optionGetOrElse (lam. error (join ["Could not find budget for task ", t.id]))
                             (mapLookup t.id state.wcets)
           in
-          let t = {t with budget = wcet, importance = wcet,
-                          particles = muli state.lowerBound t.importance}
+          let lb = int2float state.lowerBound in
+          let t = {t with budget = wcet,
+                          particles = floorfi (mulf lb t.importance)}
           in
           match mapLookup t.core acc with Some tasks then
             mapInsert t.core (snoc tasks t) acc
@@ -129,7 +133,7 @@ let confResult =
         (lam acc. lam. lam coreTasks.
           concat
             (map
-              (lam t. {t with budget = addi t.budget (floorfi (mulf (int2float t.importance) minLambda))})
+              (lam t. {t with budget = addi t.budget (floorfi (mulf t.importance minLambda))})
               coreTasks)
             acc)
         [] tasksPerCore

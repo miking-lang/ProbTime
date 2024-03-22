@@ -78,20 +78,20 @@ lang RtpplTaskPeriod = RtpplAst
 end
 
 lang RtpplTaskPriority = RtpplAst
-  sem findProgramTaskPriorities : RtpplProgram -> Map Name Int
+  sem findProgramTaskPriorities : RtpplProgram -> Map Name Float
   sem findProgramTaskPriorities =
   | ProgramRtpplProgram p ->
     findTaskPriorities p.main
 
-  sem findTaskPriorities : RtpplMain -> Map Name Int
+  sem findTaskPriorities : RtpplMain -> Map Name Float
   sem findTaskPriorities =
   | MainRtpplMain {tasks = tasks} ->
     foldl findTaskPriority (mapEmpty nameCmp) tasks
 
-  sem findTaskPriority : Map Name Int -> RtpplTask -> Map Name Int
+  sem findTaskPriority : Map Name Float -> RtpplTask -> Map Name Float
   sem findTaskPriority priorities =
   | TaskRtpplTask {id = {v = id}, p = {v = priority}} ->
-    mapInsert id priority priorities
+    mapInsert id (int2float priority) priorities
 end
 
 lang RtpplTaskInfers = RtpplAst
@@ -141,7 +141,7 @@ end
 lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority + RtpplTaskInfers
   type TaskData = {
     period : Int,
-    priority : Int
+    priority : Float
   }
 
   sem collectProgramTaskData : RtpplProgram -> Map Name TaskData
