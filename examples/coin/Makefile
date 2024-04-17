@@ -5,4 +5,4 @@ cf: coin.rpl
 	rtppl $<
 
 clean:
-	rm -rf cf cf-in1 bias cf.collect config.task* network.json __pycache__
+	rm -rf cf cf.collect cf-in1 bias system.json __pycache__

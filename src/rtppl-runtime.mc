@@ -1,5 +1,6 @@
 include "bool.mc"
 include "common.mc"
+include "json.mc"
 include "math.mc"
 include "string.mc"
 include "ext/file-ext.mc"
@@ -195,23 +196,49 @@ let storeCollectedResults = lam taskId.
   let data = map int2string (snoc execTimes overran) in
   writeFile collectionFile (strJoin "\n" data)
 
+let getJsonValueExn = lam obj. lam id.
+  match obj with JsonObject vals then
+    match mapLookup id vals with Some v then
+      v
+    else error (concat "Could not find JSON field " id)
+  else error "Attempted to access field of JSON value of non-object type"
+
+let getJsonStringExn = lam obj. lam id.
+  match getJsonValueExn obj id with JsonString s then
+    s
+  else error (join ["Expected field ", id, " to be a string value"])
+
+let getJsonIntExn = lam obj. lam id.
+  match getJsonValueExn obj id with JsonInt n then
+    n
+  else error (join ["Expected field ", id, " to be an integer value"])
+
+let findTask = lam obj. lam taskId.
+  let isTaskObj = lam taskObj.
+    eqString (getJsonStringExn taskObj "id") taskId
+  in
+  match getJsonValueExn obj "tasks" with JsonArray vals then
+    match find isTaskObj vals with Some taskValue then
+      taskValue
+    else error (concat "Failed to find task " taskId)
+  else error "Could not find tasks list in JSON configuration"
+
+let readJsonConfig = lam configFile. lam taskId.
+  let config = jsonParseExn (readFile configFile) in
+  let jsonTask = findTask config taskId in
+  let numParticles = getJsonIntExn jsonTask "particles" in
+  let budget = getJsonIntExn jsonTask "budget" in
+  let slowdown = getJsonIntExn (getJsonValueExn config "config") "slowdown" in
+  (numParticles, budget, slowdown)
+
 let rtpplReadConfigurationFile = lam taskId.
-  let configFile = concat taskId ".config" in
+  let configFile = "system.json" in
   if fileExists configFile then
-    match map string2int (strSplit " " (strTrim (readFile configFile)))
-    with [p, budget, slowdown] then
-      Some (p, budget, slowdown)
-    else
-      None ()
-  else
-    None ()
+    readJsonConfig configFile taskId
+  else error (join ["Failed to read system configuration in '", configFile, "'"])
 
 let rtpplLoadConfiguration = lam taskId.
-  match
-    optionGetOrElse
-      (lam. (100, 0, 1))
-      (rtpplReadConfigurationFile taskId)
-  with (nparticles, budget, slowd) in
+  match rtpplReadConfigurationFile taskId with (nparticles, budget, slowd) in
   modref particleCount nparticles;
   modref taskBudget budget;
   modref slowdown slowd

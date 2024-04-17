@@ -44,47 +44,79 @@ lang RtpplJson = RtpplAst + RtpplTaskData
     {acc with actuators = cons id acc.actuators}
   | _ -> acc
 
-  sem taskToJsonObject : Name -> TaskData -> JsonValue
-  sem taskToJsonObject id =
+  sem taskToJsonObject : RtpplOptions -> Name -> TaskData -> JsonValue
+  sem taskToJsonObject options id =
   | {period = period, priority = priority} ->
     let mapping = [
       ("id", JsonString (nameGetStr id)),
       ("period", JsonInt period),
-      ("importance", JsonFloat priority)
+      ("importance", JsonFloat priority),
+      ("particles", JsonInt options.defaultParticles),
+      ("budget", JsonInt 0)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
-  sem connectionToJsonObject : (String, String) -> JsonValue
+  -- TODO(larshum, 2024-04-17): Update the connection data to include actual
+  -- values for the latter three entries.
+  type ConnectionData = (String, String)
+  sem connectionToJsonObject : ConnectionData -> JsonValue
   sem connectionToJsonObject =
   | (from, to) ->
     let mapping = [
       ("from", JsonString from),
-      ("to", JsonString to)
+      ("to", JsonString to),
+      ("baseMessageSize", JsonInt 0),
+      ("perParticleMessageSize", JsonInt 0),
+      ("writesPerSecond", JsonFloat 0.0)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
-  sem makeJsonSpecification : RtpplNames -> Map Name TaskData
-                           -> [(String, String)] -> JsonValue
-  sem makeJsonSpecification names taskData =
+  -- NOTE(larshum, 2024-04-17): We include an object representing parameters
+  -- that can be reconfigured without having to recompile.
+  sem defaultConfigObject : () -> JsonValue
+  sem defaultConfigObject =
+  | _ ->
+    let mapping = [
+      ("slowdown", JsonInt 1)
+    ] in
+    JsonObject (mapFromSeq cmpString mapping)
+
+  -- NOTE(larshum, 2024-04-17): We include an object representing parameters
+  -- used during compilation that may be of interest, but which cannot be
+  -- reconfigured without recompiling.
+  sem compileOptionsToJson : RtpplOptions -> JsonValue
+  sem compileOptionsToJson =
+  | opts ->
+    let mapping = [
+      ("buffer-size", JsonInt opts.bufferSize),
+      ("default-particles", JsonInt opts.defaultParticles)
+    ] in
+    JsonObject (mapFromSeq cmpString mapping)
+
+  sem makeJsonSpecification : RtpplOptions -> RtpplNames -> Map Name TaskData
+                           -> [ConnectionData] -> JsonValue
+  sem makeJsonSpecification options names taskData =
   | connections ->
     let nameToJsonString = lam id. JsonString (nameGetStr id) in
     let topMappings = [
       ("sensors", JsonArray (map nameToJsonString names.sensors)),
       ("actuators", JsonArray (map nameToJsonString names.actuators)),
-      ("tasks", JsonArray (mapValues (mapMapWithKey taskToJsonObject taskData))),
-      ("connections", JsonArray (map connectionToJsonObject connections))
+      ("tasks", JsonArray (mapValues (mapMapWithKey (taskToJsonObject options) taskData))),
+      ("connections", JsonArray (map connectionToJsonObject connections)),
+      ("compileopts", compileOptionsToJson options),
+      ("config", defaultConfigObject ())
     ] in
     JsonObject (mapFromSeq cmpString topMappings)
 
-  sem generateJsonNetworkSpecification : RtpplOptions -> [(String, String)]
+  sem generateJsonNetworkSpecification : RtpplOptions -> [ConnectionData]
                                       -> RtpplProgram -> ()
   sem generateJsonNetworkSpecification options connections =
   | prog & (ProgramRtpplProgram {main = MainRtpplMain {ext = ext}}) ->
     let names = {sensors = [], actuators = []} in
     let names = foldl collectSensorOrActuatorName names ext in
     let taskData = collectProgramTaskData prog in
-    let json = makeJsonSpecification names taskData connections in
-    let path = optJoinPath options.outputPath "network.json" in
+    let json = makeJsonSpecification options names taskData connections in
+    let path = optJoinPath options.outputPath "system.json" in
     writeFile path (json2string json)
 end
 
