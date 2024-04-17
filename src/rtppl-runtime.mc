@@ -135,8 +135,8 @@ let rtpplMainInferRunner = lam inferModel.
   let p = deref particleCount in
   inferModel p
 
-let openFileDescriptor : String -> Int = lam file.
-  rtpplOpenFileDescriptor file
+let openFileDescriptor : String -> Int -> Int = lam file. lam bufsz.
+  rtpplOpenFileDescriptor file bufsz
 
 let closeFileDescriptor : Int -> () = lam fd.
   rtpplCloseFileDescriptor fd

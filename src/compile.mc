@@ -1084,14 +1084,21 @@ lang RtpplCompileGenerated = RtpplCompileType
     } in
     _proj info targetExpr portStr
 
-  sem generateFileDescriptorCode : Map String [String] -> RuntimeIds -> Name
-                                -> Info -> [PortData] -> Expr
-  sem generateFileDescriptorCode portMap rtIds taskId info =
+  sem generateFileDescriptorCode : RtpplOptions -> Map String [String]
+                                -> RuntimeIds -> Name -> Info -> [PortData]
+                                -> Expr
+  sem generateFileDescriptorCode options portMap rtIds taskId info =
   | ports ->
     let openFileDescField = lam port.
       match port with (portId, targetPortId) in
       let openFileExpr = TmApp {
-        lhs = _var info rtIds.openFile, rhs = _str info targetPortId,
+        lhs = TmApp {
+          lhs = _var info rtIds.openFile, rhs = _str info targetPortId,
+          ty = _tyuk info, info = info
+        },
+        rhs = TmConst {
+          val = CInt {val = options.bufferSize}, ty = _tyuk info, info = info
+        },
         ty = _tyuk info, info = info
       } in
       (stringToSid portId, openFileExpr)
@@ -1232,7 +1239,7 @@ lang RtpplCompileGenerated = RtpplCompileType
       let ports = map (lam p. {p with ty = resolveTypeAlias env.aliases p.ty}) ports in
       match partition (lam p. p.isInput) ports with (inputPorts, outputPorts) in
       bindall_ [
-        generateFileDescriptorCode portMap rtIds id info ports,
+        generateFileDescriptorCode env.options portMap rtIds id info ports,
         generateBufferInitializationCode inputSeqsId info inputPorts,
         generateBufferInitializationCode outputSeqsId info outputPorts,
         generateInputUpdateCode info inputPorts,

@@ -15,7 +15,7 @@ external clock_nanosleep : timespec -> unit = "clock_nanosleep_stub"
 external set_priority : int -> int = "set_priority_stub"
 let set_max_priority (_ : unit) : int = set_priority 255
 
-external open_file_descriptor : string -> int = "open_file_nonblocking_stub"
+external open_file_descriptor : string -> int -> int = "open_file_nonblocking_stub"
 external close_file_descriptor : int -> unit = "close_file_descriptor_stub"
 
 external read_int : int -> (int tsv) array = "rtppl_read_int_stub"
