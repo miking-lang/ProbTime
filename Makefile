@@ -36,6 +36,9 @@ uninstall:
 	rm -rf $(SRC_PATH)
 	make -C $(SUPPORT_LIB_PATH) uninstall
 
+test:
+	@$(MAKE) -s -f test.mk all
+
 clean:
 	rm -f src/ast.mc
 	rm -rf build
