@@ -389,7 +389,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
         ty = _tyuk info, info = info } )
   | TemplateDefRtpplTop {
       id = {v = id}, params = params,
-      body = {ports = ports, stmts = stmts}, info = info} ->
+      body = {ports = ports, init = init, periodic = periodic}, info = info} ->
     let params = compileParams params in
     let ty = UnitRtpplType {info = info} in
     let tyAnnot = foldl addParamTypeAnnot (compileRtpplType ty) params in
@@ -399,7 +399,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     -- Template functions may only be used from main, so we make sure to escape
     -- their names there as well.
     let escapedId = _rtpplEscapeName id in
-    let infers = collectInfersFromStatements stmts in
+    let infers = collectInfersInPeriodic periodic in
     let maxInferInfo =
       match max (lam x. lam y. subi x.1 y.1) (mapBindings infers) with Some e then
         e.0
@@ -408,7 +408,9 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     in
     let env = {env with topId = id, mainInferInfo = maxInferInfo} in
     let env = foldl buildPortTypesMap env ports in
-    let body = bindall_ (map (compileRtpplStmt env) stmts) in
+    let body = bindall_
+      (snoc (map (compileRtpplStmt env) init)
+            (compileRtpplPeriodic env periodic)) in
     ( env
     , TmLet {
         ident = escapedId, tyAnnot = tyAnnot, tyBody = _tyuk info,
@@ -571,11 +573,6 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
         inexpr = uunit_, ty = _tyuk info, info = info }
     else
       errorSingle [info] "Reference to undefined port"
-  | SdelayRtpplStmt {e = e, info = info} ->
-    TmLet {
-      ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmSdelay { e = compileRtpplExpr e, ty = _tyuk info, info = info },
-      inexpr = uunit_, ty = _tyuk info, info = info }
   | ForLoopRtpplStmt {id = {v = id}, e = e, upd = loopVar, body = body, info = info} ->
     match
       match loopVar with Some {v = lvid} then
@@ -679,6 +676,41 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     TmLet {
       ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyunit info,
       body = funCallExpr, inexpr = uunit_, ty = _tyuk info, info = info }
+
+  sem compileRtpplPeriodic : RtpplTopEnv -> RtpplPeriodic -> Expr
+  sem compileRtpplPeriodic env =
+  | PeriodicRtpplPeriodic {
+      period = period, upd = loopVar, body = body, info = info} ->
+    let loopId = nameSym "periodicFn" in
+    let initialDelay = TmLet {
+      ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmSdelay { e = compileRtpplExpr period, ty = _tyuk info, info = info },
+      inexpr = uunit_, ty = _tyuk info, info = info
+    } in
+    match
+      match loopVar with Some {v = loopVarId} then
+        (loopVarId, _var info loopVarId)
+      else
+        (nameNoSym "", uunit_)
+    with (loopVarId, tailExpr) in
+    let recCall = TmApp {
+      lhs = _var info loopId, rhs = tailExpr, ty = _tyuk info, info = info
+    } in
+    let loopBody = bind_ initialDelay (compileRtpplStmts env recCall body) in
+    let recBind = {
+      ident = loopId, tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmLam {
+        ident = loopVarId, tyAnnot = _tyuk info, tyParam = _tyuk info,
+        body = loopBody, ty = _tyuk info, info = info },
+      info = info
+    } in
+    let resultBind = TmLet {
+      ident = loopVarId, tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = recCall, inexpr = uunit_, ty = _tyuk info, info = info
+    } in
+    TmRecLets {
+      bindings = [recBind], inexpr = resultBind, ty = _tyuk info, info = info }
+
 
   sem compileRtpplExpr : RtpplExpr -> Expr
   sem compileRtpplExpr =
