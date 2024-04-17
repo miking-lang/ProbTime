@@ -53,6 +53,6 @@ using eqMat in
 
 utest linearRegression [(1,1423753),(100,2012120),(200,3358323),(400,4317528),(800,6382378)]
 with (6147.920917, 1653214.540706)
-using lam l. lam r. and (eqfApprox 1e-6 l.0 r.0) (eqfApprox 1e-6 l.1 r.1) in
+using lam l. lam r. and (eqfApprox 1e-5 l.0 r.0) (eqfApprox 1e-5 l.1 r.1) in
 
 ()

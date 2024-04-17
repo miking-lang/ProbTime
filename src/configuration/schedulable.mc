@@ -93,8 +93,8 @@ let tasks = [
   {defaultTaskData with period = 100, budget = 50},
   {defaultTaskData with period = 100, budget = 50}
 ] in
-utest schedulingPoints tasks 0 with [100] in
-utest schedulingPoints tasks 1 with [100] in
+utest schedulingPoints tasks 0 with [100.0] in
+utest schedulingPoints tasks 1 with [100.0] in
 utest schedulable tasks with true in
 utest computeLambda tasks with 0.0 using eqfApprox 1e-6 in
 
@@ -110,9 +110,9 @@ let tasks = [
   {defaultTaskData with period = 350, budget = 10},
   {defaultTaskData with period = 1000, budget = 900}
 ] in
-utest schedulingPoints tasks 0 with [300] in
-utest schedulingPoints tasks 1 with [300, 350] in
-utest schedulingPoints tasks 2 with [600, 700, 900, 1000] in
+utest schedulingPoints tasks 0 with [300.0] in
+utest schedulingPoints tasks 1 with [300.0, 350.0] in
+utest schedulingPoints tasks 2 with [600.0, 700.0, 900.0, 1000.0] in
 utest schedulable tasks with true in
 utest computeLambda tasks with 0.0 using gtf in
 
