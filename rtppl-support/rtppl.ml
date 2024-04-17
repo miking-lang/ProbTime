@@ -26,6 +26,10 @@ external read_int_record
   : int -> int -> (opaque tsv) array = "rtppl_read_int_record_stub"
 external write_int_record
   : int -> int -> opaque tsv -> unit = "rtppl_write_int_record_stub"
+external read_float_record
+  : int -> int -> (opaque tsv) array = "rtppl_read_float_record_stub"
+external write_float_record
+  : int -> int -> opaque tsv -> unit = "rtppl_write_float_record_stub"
 external read_dist_float
   : int -> ((float * float) array tsv) array = "rtppl_read_dist_float_stub"
 external write_dist_float

@@ -278,6 +278,61 @@ extern "C" {
     CAMLreturn0;
   }
 
+  value rtppl_read_float_record_stub(value fd, value nfields_val) {
+    CAMLparam2(fd, nfields_val);
+    CAMLlocal3(out, tsv, entry);
+    int64_t nfields = Long_val(nfields_val);
+    std::vector<payload> input_seq = read_messages(Int_val(fd));
+    out = caml_alloc(input_seq.size(), 0);
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      caml_initialize(&Field(out, i), Val_unit);
+    }
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      const payload &p = input_seq[i];
+      int64_t ts;
+      tsv = caml_alloc(2, 0);
+      char *ptr = p.data;
+      memcpy(&ts, ptr, sizeof(int64_t));
+      ptr += sizeof(int64_t);
+      Store_field(tsv, 0, to_timespec_value(ts));
+      entry = caml_alloc(nfields, 0);
+      for (size_t j = 0; j < nfields; j++) {
+        caml_initialize(&Field(entry, j), Val_unit);
+      }
+      for (size_t j = 0; j < nfields; j++) {
+        int64_t v;
+        memcpy(&v, ptr, sizeof(double));
+        ptr += sizeof(double);
+        Store_field(entry, j, caml_copy_double(v));
+      }
+      Store_field(tsv, 1, entry);
+      Store_field(out, i, tsv);
+    }
+    CAMLreturn(out);
+  }
+
+  void rtppl_write_float_record_stub(value fd, value nfields_val, value tsv) {
+    CAMLparam3(fd, nfields_val, tsv);
+    int64_t nfields = Long_val(nfields_val);
+    payload p;
+    p.size = sizeof(int64_t) + nfields * sizeof(double);
+    p.data = (char*)malloc(p.size);
+    char *ptr = p.data;
+    value ts = Field(tsv, 0);
+    int64_t timestamp = timespec_value_to_int64(ts);
+    memcpy(ptr, (void*)&timestamp, sizeof(int64_t));
+    ptr += sizeof(int64_t);
+    value entry = Field(tsv, 1);
+    for (size_t i = 0; i < nfields; i++) {
+      double v = Double_field(entry, i);
+      memcpy(ptr, (void*)&v, sizeof(double));
+      ptr += sizeof(double);
+    }
+    write_message(Int_val(fd), p);
+    free(p.data);
+    CAMLreturn0;
+  }
+
   value rtppl_read_dist_float_stub(value fd) {
     CAMLparam1(fd);
     CAMLlocal4(out, dist_samples, entry, tsv);

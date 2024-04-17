@@ -150,6 +150,9 @@ let rtpplReadFloat = lam fd.
 let rtpplReadIntRecord = lam fd. lam nfields.
   rtpplReadIntRecord fd nfields
 
+let rtpplReadFloatRecord = lam fd. lam nfields.
+  rtpplReadFloatRecord fd nfields
+
 let rtpplReadDistFloat = lam fd.
   rtpplReadDistFloat fd
 
@@ -167,6 +170,10 @@ let rtpplWriteFloats =
 let rtpplWriteIntRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteIntRecord fd nfields msg) msgs
+
+let rtpplWriteFloatRecords =
+  lam fd. lam nfields. lam msgs.
+  iter (lam msg. rtpplWriteFloatRecord fd nfields msg) msgs
 
 let rtpplWriteDistFloats =
   lam fd. lam msgs.

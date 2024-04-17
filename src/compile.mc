@@ -38,11 +38,13 @@ lang RtpplCompileBase =
     readInt : Name,
     readFloat : Name,
     readIntRecord : Name,
+    readFloatRecord : Name,
     readDistFloat : Name,
     readDistFloatRecord : Name,
     writeInt : Name,
     writeFloat : Name,
     writeIntRecord : Name,
+    writeFloatRecord : Name,
     writeDistFloat : Name,
     writeDistFloatRecord : Name,
     tsv : Name,
@@ -96,9 +98,9 @@ lang RtpplCompileBase =
     else
       let strs = [
         "sdelay", "openFileDescriptor", "closeFileDescriptor",
-        "rtpplReadInt", "rtpplReadFloat", "rtpplReadIntRecord",
+        "rtpplReadInt", "rtpplReadFloat", "rtpplReadIntRecord", "rtpplReadFloatRecord",
         "rtpplReadDistFloat", "rtpplReadDistFloatRecord", "rtpplWriteInts",
-        "rtpplWriteFloats", "rtpplWriteIntRecords",
+        "rtpplWriteFloats", "rtpplWriteIntRecords", "rtpplWriteFloatRecords",
         "rtpplWriteDistFloats", "rtpplWriteDistFloatRecords", "tsv",
         "rtpplFixedInferRunner", "rtpplMainInferRunner", "rtpplRuntimeInit"
       ] in
@@ -108,12 +110,13 @@ lang RtpplCompileBase =
         let result =
           { sdelay = get ids 0, openFile = get ids 1, closeFile = get ids 2
           , readInt = get ids 3, readFloat = get ids 4
-          , readIntRecord = get ids 5, readDistFloat = get ids 6
-          , readDistFloatRecord = get ids 7, writeInt = get ids 8
-          , writeFloat = get ids 9, writeIntRecord = get ids 10
-          , writeDistFloat = get ids 11, writeDistFloatRecord = get ids 12
-          , tsv = get ids 13, fixedInferRunner = get ids 14
-          , mainInferRunner = get ids 15, init = get ids 16 }
+          , readIntRecord = get ids 5, readFloatRecord = get ids 6
+          , readDistFloat = get ids 7, readDistFloatRecord = get ids 8
+          , writeInt = get ids 9, writeFloat = get ids 10
+          , writeIntRecord = get ids 11, writeFloatRecord = get ids 12
+          , writeDistFloat = get ids 13, writeDistFloatRecord = get ids 14
+          , tsv = get ids 15, fixedInferRunner = get ids 16
+          , mainInferRunner = get ids 17, init = get ids 18 }
         in
         modref rtIdRef (Some result);
         result
@@ -942,9 +945,17 @@ lang RtpplCompileGenerated = RtpplCompileType
         rhs = TmConst {
           val = CInt {val = length fields}, ty = _tyuk info, info = info},
         ty = _tyuk info, info = info}
+    else if forAll isFloatField fields then
+      TmApp {
+        lhs = TmApp {
+          lhs = _var info rtIds.readFloatRecord, rhs = fdExpr,
+          ty = _tyuk info, info = info },
+        rhs = TmConst {
+          val = CInt {val = length fields}, ty = _tyuk info, info = info},
+        ty = _tyuk info, info = info}
     else
       let distLimitErrMsg =
-        "The ProbTime compiler only supports reading records of integers\n"
+        "The ProbTime compiler only supports reading records of (exclusively) integers or floats\n"
       in
       errorSingle [info] distLimitErrMsg
   | DistRtpplType {ty = FloatRtpplType _, info = info} ->
@@ -1005,10 +1016,20 @@ lang RtpplCompileGenerated = RtpplCompileType
           rhs = TmConst {
             val = CInt {val = length fields}, ty = _tyuk info, info = info},
           ty = _tyuk info, info = info},
-        rhs = msgsExpr, ty = _tyuk info, info = info}
+        rhs = _unsafe msgsExpr, ty = _tyuk info, info = info}
+    else if forAll isFloatField fields then
+      TmApp {
+        lhs = TmApp {
+          lhs = TmApp {
+            lhs = _var info rtIds.writeFloatRecord, rhs = fdExpr,
+            ty = _tyuk info, info = info},
+          rhs = TmConst {
+            val = CInt {val = length fields}, ty = _tyuk info, info = info},
+          ty = _tyuk info, info = info},
+        rhs = _unsafe msgsExpr, ty = _tyuk info, info = info}
     else
         let distLimitErrMsg =
-          "The ProbTime compiler only supports writing records of integers\n"
+          "The ProbTime compiler only supports writing records of (exclusively) integers or floats\n"
         in
         errorSingle [info] distLimitErrMsg
   | DistRtpplType {ty = FloatRtpplType _, info = info} ->
