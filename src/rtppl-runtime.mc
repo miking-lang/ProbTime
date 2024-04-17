@@ -125,11 +125,10 @@ let sdelay =
   updateInputs ();
   overrun
 
--- NOTE(larshum, 2023-09-07): We use a hard-coded number of particles for all
--- infers that run outside of the main loop. We assume the task has sufficient
--- time to run these models within the execution time it is allocated.
-let rtpplFixedInferRunner = lam inferModel.
-  inferModel 100
+-- NOTE(larshum, 2024-04-17): For infers running outside of the periodic loop,
+-- we use a fixed number of particles determined via a command-line argument.
+let rtpplFixedInferRunner = lam pc. lam inferModel.
+  inferModel pc
 
 let rtpplMainInferRunner = lam inferModel.
   let p = deref particleCount in

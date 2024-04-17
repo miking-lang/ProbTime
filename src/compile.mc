@@ -498,11 +498,18 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       body = TmAssume { dist = compileRtpplExpr d, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
   | InferRtpplStmt {id = {v = id}, model = model, info = info} ->
-    let inferFuncId =
+    let inferFunc =
+      let rtids = getRuntimeIds () in
       if eqi (infoCmp info env.mainInferInfo) 0 then
-        (getRuntimeIds ()).mainInferRunner
+        _var info rtids.mainInferRunner
       else
-        (getRuntimeIds ()).fixedInferRunner
+        TmApp {
+          lhs = _var info rtids.fixedInferRunner,
+          rhs = TmConst {
+            val = CInt {val = env.options.defaultParticles}, ty = _tyuk info,
+            info = info
+          },
+          ty = _tyuk info, info = info}
     in
     let inferModelBind = TmLet {
       ident = nameNoSym "inferModel", tyAnnot = _tyuk info, tyBody = _tyuk info,
@@ -521,8 +528,8 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       ident = id, tyAnnot = TyDist {ty = _tyuk info, info = info},
       tyBody = _tyuk info,
       body = TmApp {
-        lhs = _var info inferFuncId,
-        rhs = _var info (nameNoSym "inferModel"), ty = _tyuk info, info = info},
+        lhs = inferFunc, rhs = _var info (nameNoSym "inferModel"),
+        ty = _tyuk info, info = info},
       inexpr = uunit_, ty = _tyuk info, info = info
     } in
     bindall_ [ inferModelBind, distBind ]
