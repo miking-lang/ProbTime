@@ -14,6 +14,6 @@ with mmio.probtime_open("bias") as f:
     while True:
         msgs = f.read_messages()
         for msg in msgs:
-            _, payload = struct.unpack("=qd", msg)
-            print(f"Expected bias: {payload}")
+            _, mu, sigma = struct.unpack("=qdd", msg)
+            print(f"Coin distribution: {mu} ± {sigma}")
         time.sleep(0.1)

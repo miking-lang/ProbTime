@@ -37,11 +37,20 @@ def expectedValue(d : Dist(Float)) : Float {
   return acc
 }
 
+def stddev(d : Dist(Float), mu : Float) : Float {
+  var acc = 0.0
+  var s = samples d
+  for i in range(0, |s.s|) update acc {
+    acc = acc + (s.s[i] - mu) * (s.s[i] - mu) * exp(s.w[i])
+  }
+  return sqrt(acc)
+}
+
 // An iterative coin flip task template. We start from a uniform distribution,
 // and repeatedly update the distribution based on our new observations.
 template CoinFlip() {
   input in1 : Float
-  output out1 : Float
+  output out1 : {mu : Float, sigma : Float}
 
   // We start from a uniform distribution.
   var d = Uniform(0.0, 1.0)
@@ -59,9 +68,11 @@ template CoinFlip() {
     // as the number of particles grows too large.
     infer coinFlipModel(d, indata) to d
 
-    // We compute the expected value (the expected bias) of the current
-    // distribution and write it to the output channel.
-    write expectedValue(d) to out1
+    // We write the expected value and the standard deviation of the empirical
+    // distribution to the output port.
+    var mu = expectedValue(d)
+    var sigma = stddev(d, mu)
+    write {mu = mu, sigma = sigma} to out1
   }
 }
 
