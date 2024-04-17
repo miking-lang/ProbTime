@@ -4,8 +4,8 @@
 // always yields heads has bias 0.0.
 model coinFlipModel(prior : Dist(Float), observations : [TSV(Float)]) : Float {
   sample bias ~ prior
-  loop for obs in observations {
-    cond if value(obs) == 0.0 {
+  for obs in observations {
+    if value(obs) == 0.0 {
       observe false ~ Bernoulli(bias)
     } else {
       observe true ~ Bernoulli(bias)
@@ -22,7 +22,7 @@ def printObs(obs : TSV(Float)) : Unit {
 
 def printInput(observations : [TSV(Float)]) : Unit {
   printLine("Received observations:")
-  loop for obs in observations {
+  for obs in observations {
     printObs(obs)
   }
 }
@@ -31,7 +31,7 @@ def printInput(observations : [TSV(Float)]) : Unit {
 def expectedValue(d : Dist(Float)) : Float {
   var acc = 0.0
   var s = samples d
-  loop acc for i in range(0, |s.s|) {
+  for i in range(0, |s.s|) update acc {
     acc = acc + (s.s[i]) * exp(s.w[i])
   }
   return acc
@@ -48,8 +48,7 @@ template CoinFlip() {
 
   // We use 'd' in the loop to indicate that its updated values should be made
   // visible to later iterations of the loop.
-  loop d {
-    delay 1s
+  periodic 1s update d {
     read in1 to indata
     printInput(indata)
 

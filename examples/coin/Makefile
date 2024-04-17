@@ -2,7 +2,7 @@ run: cf
 	python3 run.py
 
 cf: coin.rpl
-	rtppl --release $<
+	rtppl $<
 
 clean:
-	rm -f cf cf-in1 cf-out1 cf-co* config.task* network.json
+	rm -rf cf cf-in1 bias cf.collect config.task* network.json __pycache__

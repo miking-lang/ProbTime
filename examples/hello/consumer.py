@@ -4,19 +4,16 @@ import struct
 import sys
 import time
 
-fd = open("b-out1", "rb")
-i = 0
+import mmio
 
 def sigint_handler(sig, frame):
-    fd.close()
     sys.exit(0)
-
 signal.signal(signal.SIGINT, sigint_handler)
-while True:
-    data = fd.read()
-    ofs = 0
-    while ofs < len(data):
-        sz, ts, payload = struct.unpack("=qqd", data[ofs:ofs+24])
-        print(f"Received message with timestamp {ts} and payload {payload}")
-        ofs += 24
-    time.sleep(0.1)
+
+with mmio.probtime_open("dst") as f:
+    while True:
+        msgs = f.read_messages()
+        for msg in msgs:
+            ts, payload = struct.unpack("=qd", msg)
+            print(f"Received message with timestamp {ts} and payload {payload}")
+        time.sleep(0.1)
