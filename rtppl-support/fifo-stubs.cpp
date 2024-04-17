@@ -300,7 +300,7 @@ extern "C" {
         caml_initialize(&Field(entry, j), Val_unit);
       }
       for (size_t j = 0; j < nfields; j++) {
-        int64_t v;
+        double v;
         memcpy(&v, ptr, sizeof(double));
         ptr += sizeof(double);
         Store_field(entry, j, caml_copy_double(v));
@@ -324,7 +324,7 @@ extern "C" {
     ptr += sizeof(int64_t);
     value entry = Field(tsv, 1);
     for (size_t i = 0; i < nfields; i++) {
-      double v = Double_field(entry, i);
+      double v = Double_val(Field(entry, i));
       memcpy(ptr, (void*)&v, sizeof(double));
       ptr += sizeof(double);
     }
