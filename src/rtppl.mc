@@ -1,6 +1,7 @@
 include "argparse.mc"
 include "ast.mc"
 include "compile.mc"
+include "connection-data.mc"
 include "pprint.mc"
 include "task-data.mc"
 include "validate.mc"
@@ -24,7 +25,7 @@ let _rts = lam.
   let _defaultRuntimes = mapFromSeq cmpInferMethod [(_bpf, _bpfRtEntry)] in
   combineRuntimes default _defaultRuntimes
 
-lang RtpplJson = RtpplAst + RtpplTaskData
+lang RtpplJson = RtpplAst + RtpplTaskData + RtpplConnectionData
   type RtpplNames = {
     sensors : [Name],
     actuators : [Name]
@@ -56,18 +57,15 @@ lang RtpplJson = RtpplAst + RtpplTaskData
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
-  -- TODO(larshum, 2024-04-17): Update the connection data to include actual
-  -- values for the latter three entries.
-  type ConnectionData = (String, String)
   sem connectionToJsonObject : ConnectionData -> JsonValue
   sem connectionToJsonObject =
-  | (from, to) ->
+  | c ->
     let mapping = [
-      ("from", JsonString from),
-      ("to", JsonString to),
-      ("baseMessageSize", JsonInt 0),
-      ("perParticleMessageSize", JsonInt 0),
-      ("writesPerSecond", JsonFloat 0.0)
+      ("from", JsonString (portSpecToString c.from)),
+      ("to", JsonString (portSpecToString c.to)),
+      ("messageBaseSize", JsonInt (baseMessageSize c.ty)),
+      ("messagePerParticleSize", JsonInt (perParticleMessageSize c.ty)),
+      ("messageFrequency", JsonFloat c.messageFrequency)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
@@ -108,13 +106,13 @@ lang RtpplJson = RtpplAst + RtpplTaskData
     ] in
     JsonObject (mapFromSeq cmpString topMappings)
 
-  sem generateJsonNetworkSpecification : RtpplOptions -> [ConnectionData]
-                                      -> RtpplProgram -> ()
-  sem generateJsonNetworkSpecification options connections =
+  sem generateJsonSystemSpecification : RtpplOptions -> RtpplProgram -> ()
+  sem generateJsonSystemSpecification options =
   | prog & (ProgramRtpplProgram {main = MainRtpplMain {ext = ext}}) ->
     let names = {sensors = [], actuators = []} in
     let names = foldl collectSensorOrActuatorName names ext in
     let taskData = collectProgramTaskData prog in
+    let connections = collectConnectionData prog in
     let json = makeJsonSpecification options names taskData connections in
     let path = optJoinPath options.outputPath "system.json" in
     writeFile path (json2string json)
@@ -168,9 +166,6 @@ lang Rtppl =
     let ast = mexprCompile dpplOpts runtimeData ast in
     buildTaskMExpr options filepath ast
 
-  -- TODO(larshum, 2023-04-12): For now, we just use the mi compiler
-  -- directly. When a task makes use of PPL constructs, we should use the
-  -- CorePPL compiler instead.
   sem buildTaskExecutable : RtpplOptions -> Name -> Expr -> ()
   sem buildTaskExecutable options taskId =
   | taskAst ->
@@ -179,8 +174,8 @@ lang Rtppl =
 
   sem buildRtppl : RtpplOptions -> RtpplProgram -> CompileResult -> ()
   sem buildRtppl options program =
-  | {tasks = tasks, connections = connections} ->
-    generateJsonNetworkSpecification options connections program;
+  | tasks ->
+    generateJsonSystemSpecification options program;
     mapFoldWithKey (lam. lam k. lam v. buildTaskExecutable options k v) () tasks
 end
 
@@ -201,7 +196,7 @@ let result = compileRtpplProgram options program in
     (lam id. lam ast.
       printLn (join ["Task ", nameGetStr id, ":"]);
       printLn (expr2str ast))
-    result.tasks;
+    result;
   ()
 else ());
 buildRtppl options program result

@@ -33,9 +33,9 @@ lang RtpplTaskPeriod = RtpplAst
     match mapLookup id argMap with Some expr then
       resolvePeriod info argMap expr
     else
-      errorSingle [info] "Could not resolve period of task"
+      errorSingle [info] "Could not determine the task period statically"
   | _ ->
-    errorSingle [info] "Could not resolve period of task"
+    errorSingle [info] "Could not determine the task period statically"
 
   sem findTaskTemplateData : Map Name TemplateData -> RtpplTop -> Map Name TemplateData
   sem findTaskTemplateData acc =

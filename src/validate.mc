@@ -3,7 +3,7 @@ include "ast.mc"
 -- NOTE(larshum, 2023-04-12): Validates the network defined in the RTPPL
 -- program. This includes ensuring that all ports are used, and that they are
 -- used correctly.
-lang RtpplValidateNetwork = RtpplAst
+lang RtpplValidateSystem = RtpplAst
   syn PortId =
   | External Name
   | Internal (Name, String)
@@ -57,10 +57,10 @@ lang RtpplValidateNetwork = RtpplAst
     decls : Map Name PortConfig
   }
 
-  type Network = Map PortId PortState
+  type System = Map PortId PortState
 
-  sem validateRtpplProgramNetwork : RtpplProgram -> ()
-  sem validateRtpplProgramNetwork =
+  sem validateRtpplProgramSystem : RtpplProgram -> ()
+  sem validateRtpplProgramSystem =
   | ProgramRtpplProgram {tops = tops, main = main} ->
     let emptyPorts = {
       sensors = mapEmpty nameCmp,
@@ -68,7 +68,7 @@ lang RtpplValidateNetwork = RtpplAst
       decls = mapEmpty nameCmp
     } in
     let declPorts = foldl collectDeclaredPorts emptyPorts tops in
-    validateNetwork declPorts main
+    validateSystem declPorts main
 
   sem collectDeclaredPorts : PortDecls -> RtpplTop -> PortDecls
   sem collectDeclaredPorts acc =
@@ -100,8 +100,8 @@ lang RtpplValidateNetwork = RtpplAst
   | ActuatorRtpplExt {id = {v = id}, info = info} ->
     {acc with actuators = mapInsert id info acc.actuators}
 
-  sem validateNetwork : PortDecls -> RtpplMain -> ()
-  sem validateNetwork declPorts =
+  sem validateSystem : PortDecls -> RtpplMain -> ()
+  sem validateSystem declPorts =
   | MainRtpplMain {ext = ext, tasks = tasks, connections = connections} ->
     let declPorts = foldl addSensorOrActuatorPort declPorts ext in
 
@@ -115,26 +115,26 @@ lang RtpplValidateNetwork = RtpplAst
     let network = foldl (insertTaskPorts declPorts.decls) network tasks in
 
     -- Update the state of the ports based on the connection definitions.
-    let network = foldl addConnection network connections in
+    let network = foldl addConnectionToSystem network connections in
 
     -- Validate the resulting network.
     mapFoldWithKey validatePortState () network
 
-  sem insertSensor : Network -> Name -> Info -> Network
+  sem insertSensor : System -> Name -> Info -> System
   sem insertSensor network id =
   | info ->
     let portId = External id in
     let state = UnusedSensorOutput info in
     mapInsert portId state network
 
-  sem insertActuator : Network -> Name -> Info -> Network
+  sem insertActuator : System -> Name -> Info -> System
   sem insertActuator network id =
   | info ->
     let portId = External id in
     let state = UnusedActuatorInput info in
     mapInsert portId state network
 
-  sem insertTaskPorts : Map Name PortConfig -> Network -> RtpplTask -> Network
+  sem insertTaskPorts : Map Name PortConfig -> System -> RtpplTask -> System
   sem insertTaskPorts decls network =
   | TaskRtpplTask {id = {v = id}, templateId = {v = tid}, info = info} ->
     let config =
@@ -145,14 +145,14 @@ lang RtpplValidateNetwork = RtpplAst
     in
     mapFoldWithKey (insertTaskPort id) network config
 
-  sem insertTaskPort : Name -> Network -> String -> PortState -> Network
+  sem insertTaskPort : Name -> System -> String -> PortState -> System
   sem insertTaskPort taskId network portId =
   | state ->
     let portId = Internal (taskId, portId) in
     mapInsert portId state network
 
-  sem addConnection : Network -> RtpplConnection -> Network
-  sem addConnection network =
+  sem addConnectionToSystem : System -> RtpplConnection -> System
+  sem addConnectionToSystem network =
   | ConnectionRtpplConnection {from = fromSpec, to = toSpec, info = info} ->
     let from = portSpecToPortId fromSpec in
     let to = portSpecToPortId toSpec in
@@ -270,10 +270,10 @@ lang RtpplValidateNames = RtpplAst
     (id, info)
 end
 
-lang RtpplValidate = RtpplValidateNetwork + RtpplValidateNames
+lang RtpplValidate = RtpplValidateSystem + RtpplValidateNames
   sem validateRtpplProgram : RtpplProgram -> ()
   sem validateRtpplProgram =
   | p & (ProgramRtpplProgram {tops = tops, main = main}) ->
     validateRtpplProgramNames p;
-    validateRtpplProgramNetwork p
+    validateRtpplProgramSystem p
 end

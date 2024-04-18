@@ -1260,10 +1260,7 @@ lang RtpplCompile =
   BootParser + MExprUtestGenerate + MExprEliminateDuplicateCode +
   RtpplCompileGenerated
 
-  type CompileResult = {
-    tasks : Map Name Expr,
-    connections : [(String, String)]
-  }
+  type CompileResult = Map Name Expr
 
   sem toPortData : RtpplPort -> PortData
   sem toPortData =
@@ -1358,8 +1355,9 @@ lang RtpplCompile =
   -- NOTE(larshum, 2023-04-11): The AST of each task is produced by performing
   -- extraction from a common AST containing all definitions from the RTPPL
   -- program combined with the shared runtime.
-  sem compileTask : CompileEnv -> CompileResult -> RtpplTask -> CompileResult
-  sem compileTask env acc =
+  sem compileTask : CompileEnv -> [(String, String)] -> CompileResult
+                 -> RtpplTask -> CompileResult
+  sem compileTask env connections tasks =
   | (TaskRtpplTask {id = {v = id}, templateId = {v = tid}, args = args,
                     p = {v = taskPriority}, info = info}) & task ->
     let args = map (resolveConstants env.consts) args in
@@ -1407,7 +1405,7 @@ lang RtpplCompile =
                   let pid = _getPortIdentifier id p.id in
                   mapInsert pid [] acc)
               (mapEmpty cmpString) ports)
-            acc.connections
+            connections
         in
         -- NOTE(larshum, 2023-04-17): We generate the task-specific runtime
         -- code and insert it directly after the pre-generated runtime.
@@ -1419,7 +1417,7 @@ lang RtpplCompile =
           symbolize
             (extractAst (identifiersInExpr (setEmpty nameCmp) tailExpr) ast)
         in
-        {acc with tasks = mapInsert id (bind_ ast tailExpr) acc.tasks}
+        mapInsert id (bind_ ast tailExpr) tasks
       else
         errorSingle [info]
           "Task is instantiated from definition with no port declarations"
@@ -1433,25 +1431,25 @@ lang RtpplCompile =
   | t ->
     sfold_Expr_Expr identifiersInExpr acc t
 
-  sem portSpecToString : RtpplPortSpec -> String
-  sem portSpecToString =
-  | PortSpecRtpplPortSpec {port = {v = portId}, id = Some {v = taskId}} ->
-    join [nameGetStr portId, "-", taskId]
+  sem rtpplPortSpecToString : RtpplPortSpec -> String
+  sem rtpplPortSpecToString =
+  | PortSpecRtpplPortSpec {port = {v = taskId}, id = Some {v = portId}} ->
+    join [nameGetStr taskId, "-", portId]
   | PortSpecRtpplPortSpec {port = {v = portId}, id = None _} ->
     nameGetStr portId
 
-  sem addConnectionToResult : CompileResult -> RtpplConnection -> CompileResult
-  sem addConnectionToResult acc =
+  sem addConnection : [(String, String)] -> RtpplConnection -> [(String, String)]
+  sem addConnection acc =
   | ConnectionRtpplConnection {from = from, to = to} ->
-    let conn = (portSpecToString from, portSpecToString to) in
-    {acc with connections = cons conn acc.connections}
+    let conn = (rtpplPortSpecToString from, rtpplPortSpecToString to) in
+    cons conn acc
 
   sem compileMain : CompileEnv -> RtpplMain -> CompileResult
   sem compileMain env =
   | MainRtpplMain {tasks = tasks, connections = connections} ->
-    let emptyResult = { tasks = mapEmpty nameCmp, connections = [] } in
-    let result = foldl addConnectionToResult emptyResult connections in
-    foldl (compileTask env) result tasks
+    let result = mapEmpty nameCmp in
+    let connections = foldl addConnection [] connections in
+    foldl (compileTask env connections) result tasks
 
   sem collectPortsPerTop : Map Name [PortData] -> RtpplTop -> Map Name [PortData]
   sem collectPortsPerTop portMap =
