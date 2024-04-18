@@ -53,7 +53,8 @@ lang RtpplJson = RtpplAst + RtpplTaskData + RtpplConnectionData
       ("period", JsonInt period),
       ("importance", JsonFloat priority),
       ("particles", JsonInt options.defaultParticles),
-      ("budget", JsonInt 0)
+      ("budget", JsonInt 0),
+      ("core", JsonInt 0)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
