@@ -71,8 +71,8 @@ lang RtpplPrettyPrint = RtpplAst
 
   sem pprintRtpplExt : RtpplExt -> String
   sem pprintRtpplExt =
-  | SensorRtpplExt {id = {v = id}, ty = ty} ->
-    join ["  sensor ", nameGetStr id, " : ", pprintRtpplType ty]
+  | SensorRtpplExt {id = {v = id}, ty = ty, r = r} ->
+    join ["  sensor ", nameGetStr id, " : ", pprintRtpplType ty, " maxrate ", pprintRtpplExpr 0 r]
   | ActuatorRtpplExt {id = {v = id}, ty = ty} ->
     join ["  actuator ", nameGetStr id, " : ", pprintRtpplType ty]
 
