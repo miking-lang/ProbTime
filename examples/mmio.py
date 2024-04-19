@@ -5,14 +5,13 @@ import sys
 from multiprocessing import shared_memory
 import contextlib
 
-BUFFER_SIZE = 2**22
-
 class ProbTimeIO:
-    def __init__(self, fname):
+    def __init__(self, fname, buffer_size):
         try:
-            self.shm = shared_memory.SharedMemory(name=fname, create=True, size=BUFFER_SIZE)
+            self.shm = shared_memory.SharedMemory(name=fname, create=True, size=buffer_size)
         except:
-            # Assume the shared memory buffer has already been created
+            # Assume the shared memory buffer has already been created by
+            # another process using the correct buffer size.
             self.shm = shared_memory.SharedMemory(name=fname)
         self.pos = 0
 
@@ -71,8 +70,8 @@ class ProbTimeIO:
         shm.buf[sz_pos:sz_pos+8] = szbytes
 
 @contextlib.contextmanager
-def probtime_open(f):
-    x = ProbTimeIO(f)
+def probtime_open(f, buffer_size):
+    x = ProbTimeIO(f, buffer_size)
     try:
         yield x
     finally:

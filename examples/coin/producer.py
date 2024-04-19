@@ -1,4 +1,5 @@
 # A producer of artificial coin-flip outcomes written to the cf task.
+import json
 import random
 import signal
 import struct
@@ -26,7 +27,11 @@ def sigint_handler(sig, frame):
     sys.exit(0)
 signal.signal(signal.SIGINT, sigint_handler)
 
-with mmio.probtime_open("cf-in1") as f:
+with open("system.json", "r") as f:
+    data = json.load(f)
+    buffer_size = data["compileopts"]["buffer-size"]
+
+with mmio.probtime_open("cf-in1", buffer_size) as f:
     while True:
         ts = time.time_ns()
         payload = biased_coin()
