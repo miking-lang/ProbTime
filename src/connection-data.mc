@@ -173,22 +173,22 @@ end
 -- the count - we represent this using 'Dynamic'. Based on this count and the
 -- period of a task, we can compute the peak message frequency.
 lang RtpplConnectionMessageFrequency = RtpplConnectionBase + RtpplTaskPeriod
-  syn WriteFreq =
+  syn PortFreq =
   | Fixed Float
   | Dynamic ()
 
-  sem mapWriteFreq : (Float -> Float -> Float) -> WriteFreq -> WriteFreq -> WriteFreq
-  sem mapWriteFreq f lc =
+  sem mapPortFreq : (Float -> Float -> Float) -> PortFreq -> PortFreq -> PortFreq
+  sem mapPortFreq f lc =
   | rc ->
-    mapWriteFreqH f (lc, rc)
+    mapPortFreqH f (lc, rc)
 
-  sem mapWriteFreqH : (Float -> Float -> Float) -> (WriteFreq, WriteFreq) -> WriteFreq
-  sem mapWriteFreqH f =
+  sem mapPortFreqH : (Float -> Float -> Float) -> (PortFreq, PortFreq) -> PortFreq
+  sem mapPortFreqH f =
   | (Fixed a, Fixed b) -> Fixed (f a b)
   | _ -> Dynamic ()
 
-  sem findConnectionMessageFrequencies : RtpplProgram -> Map ConnectionSpec Float
-  sem findConnectionMessageFrequencies =
+  sem findConnectionMaxMessages : RtpplProgram -> Map ConnectionSpec Float
+  sem findConnectionMaxMessages =
   | prog & (ProgramRtpplProgram p) ->
     -- 1. Find the periods of all tasks (defined in task-data.mc)
     let taskPeriods = findProgramTaskPeriods prog in
@@ -196,18 +196,24 @@ lang RtpplConnectionMessageFrequency = RtpplConnectionBase + RtpplTaskPeriod
     -- 2. Collect the write count for each output port of all task templates.
     let templateWriteCounts = foldl countTemplatePortWrites (mapEmpty nameCmp) p.tops in
 
-    -- 3. Collect the write frequency of each output port. For sensors, we
-    -- compute it directly based on the annotated max rate. For tasks, we use
-    -- the write count for its corresponding template and the period of the
-    -- task to compute the frequency.
-    let portWriteFreq = findPortWriteFrequencies taskPeriods templateWriteCounts p.main in
+    -- 3. Combine the write counts with the read counts - which are always one
+    -- for all ports as each task reads from all ports at the start of each
+    -- period.
+    let templateCounts = foldl countTemplatePortReads templateWriteCounts p.tops in
 
-    -- Construct a map from connections to write frequency based on the output
-    -- port frequency.
-    findConnectionFrequencies portWriteFreq p.main
+    -- 4. Collect the frequency at which messages are sent through each output
+    -- port or read by each input port. For sensors and actuators, we
+    -- compute this directly based on the annotated max or min rates. For
+    -- tasks, we use the counts for the corresponding template and the period
+    -- of the task.
+    let portFreq = findPortFrequencies taskPeriods templateCounts p.main in
 
-  sem countTemplatePortWrites : Map Name (Map String WriteFreq) -> RtpplTop
-                             -> Map Name (Map String WriteFreq)
+    -- Construct a map from each connection to the expected maximum number of
+    -- messages that will be waiting to arrive at the destination.
+    findConnectionMaxMessagesMain portFreq p.main
+
+  sem countTemplatePortWrites : Map Name (Map String PortFreq) -> RtpplTop
+                             -> Map Name (Map String PortFreq)
   sem countTemplatePortWrites acc =
   | TemplateDefRtpplTop {id = {v = id}, body = {periodic = periodic}, info = info} ->
     let templatePortWrites =
@@ -221,56 +227,83 @@ lang RtpplConnectionMessageFrequency = RtpplConnectionBase + RtpplTaskPeriod
   -- NOTE(larshum, 2024-04-18): We count all writes we can find directly. If we
   -- find a loop we enter the below function which counts any write as dynamic
   -- as we cannot in general know how many times a loop runs.
-  sem countTemplatePortWritesStmt : Map String WriteFreq -> RtpplStmt
-                                 -> Map String WriteFreq
+  sem countTemplatePortWritesStmt : Map String PortFreq -> RtpplStmt
+                                 -> Map String PortFreq
   sem countTemplatePortWritesStmt acc =
   | WriteRtpplStmt {port = {v = portId}} ->
-    mapInsertWith (mapWriteFreq addf) portId (Fixed 1.0) acc
+    mapInsertWith (mapPortFreq addf) portId (Fixed 1.0) acc
   | ConditionRtpplStmt {thn = thn, els = els} ->
     let thnWrites = foldl countTemplatePortWritesStmt acc thn in
     let elsWrites = foldl countTemplatePortWritesStmt acc els in
-    mapUnionWith (mapWriteFreq maxf) thnWrites elsWrites
+    mapUnionWith (mapPortFreq maxf) thnWrites elsWrites
   | ForLoopRtpplStmt {body = body} | WhileLoopRtpplStmt {body = body} ->
     foldl invalidateTemplatePortWritesStmt acc body
   | s ->
     acc
 
-  sem invalidateTemplatePortWritesStmt : Map String WriteFreq -> RtpplStmt
-                                      -> Map String WriteFreq
+  sem invalidateTemplatePortWritesStmt : Map String PortFreq -> RtpplStmt
+                                      -> Map String PortFreq
   sem invalidateTemplatePortWritesStmt acc =
   | WriteRtpplStmt {port = {v = portId}} ->
     mapInsertWith (lam. lam v. v) portId (Dynamic ()) acc
   | s ->
     sfold_RtpplStmt_RtpplStmt invalidateTemplatePortWritesStmt acc s
 
-  sem findPortWriteFrequencies : Map Name Int -> Map Name (Map String WriteFreq)
-                              -> RtpplMain -> Map PortSpec Float
-  sem findPortWriteFrequencies taskPeriods templateWriteCounts =
-  | MainRtpplMain {ext = ext, tasks = tasks} ->
-    let pwf = foldl findSensorWriteFrequency (mapEmpty portSpecCmp) ext in
-    foldl (findTaskPortWriteFrequency taskPeriods templateWriteCounts) pwf tasks
+  -- NOTE(larshum, 2024-04-19): Each input port is read once per task period,
+  -- so we assign each declared input port a count of one.
+  sem countTemplatePortReads : Map Name (Map String PortFreq) -> RtpplTop
+                            -> Map Name (Map String PortFreq)
+  sem countTemplatePortReads acc =
+  | TemplateDefRtpplTop {id = {v = id}, body = {ports = ports}} ->
+    let freqs = foldl countTemplatePortReadsPort (mapEmpty cmpString) ports in
+    mapInsertWith mapUnion id freqs acc
+  | _ ->
+    acc
 
-  sem findSensorWriteFrequency : Map PortSpec Float -> RtpplExt
-                              -> Map PortSpec Float
-  sem findSensorWriteFrequency acc =
+  sem countTemplatePortReadsPort : Map String PortFreq -> RtpplPort
+                                -> Map String PortFreq
+  sem countTemplatePortReadsPort acc =
+  | InputRtpplPort {id = {v = id}} ->
+    mapInsert id (Fixed 1.0) acc
+  | _ ->
+    acc
+
+  sem findPortFrequencies : Map Name Int -> Map Name (Map String PortFreq)
+                         -> RtpplMain -> Map PortSpec Float
+  sem findPortFrequencies taskPeriods templateWriteCounts =
+  | MainRtpplMain {ext = ext, tasks = tasks} ->
+    let pwf = foldl findExtFrequency (mapEmpty portSpecCmp) ext in
+    foldl (findTaskPortFrequency taskPeriods templateWriteCounts) pwf tasks
+
+  sem findExtFrequency : Map PortSpec Float -> RtpplExt
+                   -> Map PortSpec Float
+  sem findExtFrequency acc =
   | SensorRtpplExt {id = {v = id}, r = r, info = info} ->
     let sensorPortSpec = { srcId = id, portId = None () } in
-    let maxWriteFreq =
+    let maxPortFreq =
       match r with LiteralRtpplExpr {const = LitIntRtpplConst {value = {v = n}}} then
         divf 1e9 (int2float n)
       else errorSingle [info] "Sensor maximum rate must be a literal integer value"
     in
-    mapInsert sensorPortSpec maxWriteFreq acc
+    mapInsert sensorPortSpec maxPortFreq acc
+  | ActuatorRtpplExt {id = {v = id}, r = r, info = info} ->
+    let actuatorPortSpec = { srcId = id, portId = None () } in
+    let minReadFreq =
+      match r with LiteralRtpplExpr {const = LitIntRtpplConst {value = {v = n}}} then
+        divf 1e9 (int2float n)
+      else errorSingle [info] "Actuator minimum rate must be a literal integer value"
+    in
+    mapInsert actuatorPortSpec minReadFreq acc
   | _ ->
     acc
 
-  sem findTaskPortWriteFrequency : Map Name Int -> Map Name (Map String WriteFreq)
-                                -> Map PortSpec Float -> RtpplTask
-                                -> Map PortSpec Float
-  sem findTaskPortWriteFrequency taskPeriods templateWriteCounts acc =
+  sem findTaskPortFrequency : Map Name Int -> Map Name (Map String PortFreq)
+                            -> Map PortSpec Float -> RtpplTask
+                            -> Map PortSpec Float
+  sem findTaskPortFrequency taskPeriods templateWriteCounts acc =
   | TaskRtpplTask {id = {v = id}, templateId = {v = tid}, info = info} ->
     match mapLookup id taskPeriods with Some period then
-      match mapLookup tid templateWriteCounts with Some writeCounts then
+      match mapLookup tid templateWriteCounts with Some counts then
         mapFoldWithKey
           (lam acc. lam portId. lam countRepr.
             let portSpec = { srcId = id, portId = Some portId } in
@@ -281,29 +314,39 @@ lang RtpplConnectionMessageFrequency = RtpplConnectionBase + RtpplTaskPeriod
               else match countRepr with Dynamic _ then -1.0
               else never
             in
-            let writeFreq = mulf count (divf 1e9 (int2float period)) in
-            mapInsert portSpec writeFreq acc)
-          acc writeCounts
+            let freq = mulf count (divf 1e9 (int2float period)) in
+            mapInsert portSpec freq acc)
+          acc counts
       else errorSingle [info] "Task is defined in terms of unknown task template"
     else errorSingle [info] "Failed to find period for task"
 
-  sem findConnectionFrequencies : Map PortSpec Float -> RtpplMain -> Map ConnectionSpec Float
-  sem findConnectionFrequencies portFrequencies =
+  sem findConnectionMaxMessagesMain : Map PortSpec Float -> RtpplMain
+                                   -> Map ConnectionSpec Float
+  sem findConnectionMaxMessagesMain portFrequencies =
   | MainRtpplMain {connections = connections} ->
-    foldl (addConnectionFrequency portFrequencies) (mapEmpty connectionSpecCmp) connections
+    foldl (addConnectionMaxMsgs portFrequencies) (mapEmpty connectionSpecCmp) connections
 
-  sem addConnectionFrequency : Map PortSpec Float -> Map ConnectionSpec Float
-                            -> RtpplConnection -> Map ConnectionSpec Float
-  sem addConnectionFrequency portFrequencies acc =
+  sem addConnectionMaxMsgs : Map PortSpec Float -> Map ConnectionSpec Float
+                          -> RtpplConnection -> Map ConnectionSpec Float
+  sem addConnectionMaxMsgs portFrequencies acc =
   | ConnectionRtpplConnection {from = from, to = to} ->
     let fromPortSpec = rtpplPortSpecToPortSpec from in
     let toPortSpec = rtpplPortSpecToPortSpec to in
     let connSpec = {from = fromPortSpec, to = toPortSpec} in
-    let freq =
+    let srcFreq =
       match mapLookup fromPortSpec portFrequencies with Some freq then freq
       else 0.0
     in
-    mapInsert connSpec freq acc
+    let dstFreq =
+      match mapLookup toPortSpec portFrequencies with Some freq then freq
+      else 1.0
+    in
+    -- NOTE(larshum, 2024-04-19): We compute the frequency by dividing the
+    -- frequency at which messages are written with the frequency at which they
+    -- are read by the receiving end. The result denotes the maximum number of
+    -- messages received per instance of the receiving task or actuator.
+    let maxMsgs = divf srcFreq dstFreq in
+    mapInsert connSpec maxMsgs acc
 end
 
 lang RtpplConnectionData =
@@ -314,13 +357,13 @@ lang RtpplConnectionData =
     from : PortSpec,
     to : PortSpec,
     ty : RtpplType,
-    messageFrequency : Float
+    maxMessages : Float
   }
 
   sem collectConnectionData : RtpplProgram -> [ConnectionData]
   sem collectConnectionData =
   | p & (ProgramRtpplProgram _) ->
-    let connFreq = findConnectionMessageFrequencies p in
+    let connMaxMsgs = findConnectionMaxMessages p in
     let connType = findConnectionTypes p in
     let aliases = collectTypeAliases p in
 
@@ -328,13 +371,13 @@ lang RtpplConnectionData =
     -- into one complete representation of all connection data of interest. As
     -- both maps are constructed in the same way, they both have the same key,
     -- meaning we can combine them using intersection.
-    let m = mapIntersectWith (lam l. lam r. (l, r)) connFreq connType in
+    let m = mapIntersectWith (lam l. lam r. (l, r)) connMaxMsgs connType in
     mapFoldWithKey
       (lam acc. lam conn. lam entry.
         match conn with {from = from, to = to} in
-        match entry with (freq, ty) in
+        match entry with (maxMsgs, ty) in
         let ty = resolveTypeAlias aliases ty in
-        cons {from = from, to = to, ty = ty, messageFrequency = freq} acc)
+        cons {from = from, to = to, ty = ty, maxMessages = maxMsgs} acc)
       [] m
 
   sem collectTypeAliases : RtpplProgram -> Map Name RtpplType

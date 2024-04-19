@@ -158,8 +158,8 @@ precedence {
 prod Main : RtpplMain =
   "system" "{" ext:RtpplExt* tasks:RtpplTask* connections:RtpplConnection* "}"
 
-prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType "maxrate" r:RtpplExpr
-prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType
+prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
+prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
 
 prod Task : RtpplTask = "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")" "importance" p:Integer
 prod Connection : RtpplConnection = from:RtpplPortSpec "->" to:RtpplPortSpec

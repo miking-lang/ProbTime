@@ -28,8 +28,8 @@ template X(period : Int) {
 }
 
 system {
-  sensor src : Float maxrate 1s
-  actuator dst : Float
+  sensor src : Float rate 1s
+  actuator dst : Float rate 200ms
 
   task a = X(500ms) importance 1
   task b = X(250ms) importance 1

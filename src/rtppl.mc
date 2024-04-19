@@ -66,7 +66,7 @@ lang RtpplJson = RtpplAst + RtpplTaskData + RtpplConnectionData
       ("to", JsonString (portSpecToString c.to)),
       ("messageBaseSize", JsonInt (baseMessageSize c.ty)),
       ("messagePerParticleSize", JsonInt (perParticleMessageSize c.ty)),
-      ("messageFrequency", JsonFloat c.messageFrequency)
+      ("messageMaxPerInstance", JsonFloat c.maxMessages)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 
