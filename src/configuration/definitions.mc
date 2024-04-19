@@ -35,9 +35,26 @@ let defaultTaskData = {
   budget = 0, core = 1, index = 0
 }
 
-let systemSpecFile = "network.json"
-let taskToCoreMappingFile = "task-core-map.txt"
-let defaultParticles = 100
+type PortSpec = {
+  srcId : String,
+  portId : Option String
+}
+
+let portSpecToString = lam ps.
+  match ps with {portId = Some portId} then
+    join [ps.srcId, "-", portId]
+  else
+    ps.srcId
+
+type Connection = {
+  from : PortSpec,
+  to : PortSpec,
+  messageBaseSize : Int,
+  messagePerParticleSize : Int,
+  messageFrequency : Float
+}
+
+let systemSpecFile = "system.json"
 
 let cmpFloat : Float -> Float -> Int = lam l. lam r.
   if gtf l r then 1 else if ltf l r then negi 1 else 0

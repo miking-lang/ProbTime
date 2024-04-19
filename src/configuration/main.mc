@@ -11,29 +11,6 @@ include "definitions.mc"
 include "json-parse.mc"
 include "schedulable.mc"
 
-let loadTaskToCoreMapping = lam options. lam tasks.
-  let taskToCoreMap : Map String Int =
-    let ttcFile = sysJoinPath options.systemPath taskToCoreMappingFile in
-    if fileExists ttcFile then
-      foldl
-        (lam acc. lam line.
-          match strSplit " " line with [taskname, core] in
-          let coreIdx = string2int core in
-          mapInsert taskname coreIdx acc)
-        (mapEmpty cmpString)
-        (strSplit "\n" (strTrim (readFile ttcFile)))
-    else
-      error (join [
-        "The task-to-core mapping must be provided in a file '",
-        taskToCoreMappingFile, "'" ])
-  in
-  map
-    (lam t.
-      match mapLookup t.id taskToCoreMap with Some coreIdx then
-        {t with core = coreIdx}
-      else error (join ["Task ", t.id, " was not assigned to a core"]))
-    tasks
-
 let printNanosAsSeconds = lam ns.
   float2string (divf (int2float ns) 1e9)
 
@@ -52,7 +29,6 @@ match constructSystemDependencyGraph systemSpecJson with (tasks, g) in
 let tasks = mergeSort (lam l. lam r. subi l.period r.period) tasks in
 let tasks = mapi (lam i. lam t. {t with index = i}) tasks in
 
-let tasks = loadTaskToCoreMapping options tasks in
 print "Using the following task-to-core mapping\n";
 iter
   (lam t.

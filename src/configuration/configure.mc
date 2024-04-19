@@ -3,7 +3,9 @@ include "digraph.mc"
 include "map.mc"
 include "sys.mc"
 
+include "buffers.mc"
 include "definitions.mc"
+include "json-parse.mc"
 include "regression.mc"
 include "schedulable.mc"
 
@@ -17,12 +19,13 @@ type TaskConfigState = {
 
 let defaultUpperBound = floorfi 1e10
 
-let writeTaskConfig = lam path. lam task.
-  let taskConfigFile = sysJoinPath path (concat task.id ".config") in
-  -- NOTE(larshum, 2023-10-17): When configuring tasks, we always assume a
-  -- slowdown factor of 1, i.e., that we are replaying data in real-time.
-  let msg = join [int2string task.particles, " ", int2string task.budget, " 1"] in
-  writeFile taskConfigFile msg
+let writeTaskConfig = lam path. lam tasks.
+  let systemConfigFile = sysJoinPath path systemSpecFile in
+  let updJson =
+    let json = parseSystemSpecJson systemConfigFile in
+    updateTasks json tasks
+  in
+  writeFile systemConfigFile (json2string updJson)
 
 let readTaskCollect = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
@@ -46,16 +49,12 @@ let readTaskCollect = lam path. lam taskId.
 let runTasks : String -> String -> [TaskData] -> Map String Int =
   lam path. lam runner. lam tasks.
 
-  -- 1. Write the number of particles to use to the configuration file the
-  -- respective task.
-  iter (lam t. writeTaskConfig path t) tasks;
-
-  -- 2. Invoke the runner.
+  -- Invoke the runner.
   let result = sysRunCommand [runner] "" "." in
 
-  -- 3. Return the WCET estimtates for each task, if the runner exited with
-  -- code zero. Otherwise, we report an error and print stdout/stderr.
-  -- If any task overran its period, we report this by setting the WCET to 0.
+  -- Return the WCET estimtates for each task, if the runner exited with code
+  -- zero. Otherwise, we report an error and print stdout/stderr. If any task
+  -- overran its period, we report this by setting the WCET to 0.
   if eqi result.returncode 0 then
     foldl
       (lam acc. lam t.
@@ -69,6 +68,33 @@ let runTasks : String -> String -> [TaskData] -> Map String Int =
       "stdout:\n", result.stdout, "\nstderr:\n", result.stderr, "\n"
     ] in
     error msg
+
+-- Repeatedly run tasks for a given number of times, and return the maximum
+-- observed WCET for each task.
+let repeatRunTasks : ConfigureOptions -> [TaskData] -> Int -> Map String Int =
+  lam options. lam tasks. lam repetitions.
+
+  -- Update the particle count of all tasks in the configuration file.
+  writeTaskConfig options.systemPath tasks;
+
+  -- Verify that the buffer size is sufficient for all connections.
+  verifyBufferSizes options.systemPath;
+
+  -- Repeatedly run the tasks while collecting their WCETs
+  let res =
+    create repetitions (lam. runTasks options.systemPath options.runnerCmd tasks)
+  in
+
+  -- Compute the WCET among all runs for each task
+  foldl
+    (lam acc. lam wcets.
+      mapMerge
+        (lam lhs. lam rhs.
+          match (lhs, rhs) with (Some l, Some r) then
+            Some (maxi l r)
+          else error "Incompatible results from runTasks")
+        acc wcets)
+    (head res) (tail res)
 
 let tasksWithParticleCounts = lam tasks. lam taskMap.
   map
@@ -117,16 +143,7 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
     else
       let wcets =
         let twpc = tasksWithParticleCounts tasks state in
-        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd twpc) in
-        foldl
-          (lam acc. lam wcets.
-            mapMerge
-              (lam lhs. lam rhs.
-                match (lhs, rhs) with (Some l, Some r) then
-                  Some (maxi l r)
-                else error "Incompatible results from runTasks")
-              acc wcets)
-          (head res) (tail res)
+        repeatRunTasks options twpc 3
       in
       -- NOTE(larshum, 2023-10-12): If a task we had already fixed the number
       -- of particles for overruns, we need to re-configure it and all tasks
@@ -254,20 +271,11 @@ let configureTasksParticleFairness = lam options. lam tasks.
       in
       let wcets =
         let tasks =
-          map (lam t. {t with particles = floorfi (mulf (int2float k) t.importance)}) tasks
+          map (lam t. {t with particles = roundfi (mulf (int2float k) t.importance)}) tasks
         in
         -- NOTE(larshum, 2023-10-14): We repeat the estimations three times and
         -- taking the maximum WCET among the runs for each task.
-        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
-        foldl
-          (lam acc. lam wcets.
-            mapMerge
-              (lam lhs. lam rhs.
-                match (lhs, rhs) with (Some l, Some r) then
-                  Some (maxi l r)
-                else error "Incompatible results from runTasks")
-              acc wcets)
-          (head res) (tail res)
+        repeatRunTasks options tasks 3
       in
       let updState =
         let wcets =
