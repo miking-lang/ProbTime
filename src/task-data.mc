@@ -58,7 +58,9 @@ lang RtpplTaskPriority = RtpplAst
   sem findProgramTaskPriorities : RtpplProgram -> Map Name Float
   sem findProgramTaskPriorities =
   | ProgramRtpplProgram p ->
-    findTaskPriorities p.main
+    let priorities = findTaskPriorities p.main in
+    let sum = foldl addf 0.0 (mapValues priorities) in
+    mapMapWithKey (lam. lam p. normalizedPriority sum p) priorities
 
   sem findTaskPriorities : RtpplMain -> Map Name Float
   sem findTaskPriorities =
@@ -69,6 +71,11 @@ lang RtpplTaskPriority = RtpplAst
   sem findTaskPriority priorities =
   | TaskRtpplTask {id = {v = id}, p = {v = priority}} ->
     mapInsert id (int2float priority) priorities
+
+  sem normalizedPriority : Float -> Float -> Float
+  sem normalizedPriority prioritySum =
+  | priority ->
+    divf priority prioritySum
 end
 
 lang RtpplTaskInfers = RtpplAst
