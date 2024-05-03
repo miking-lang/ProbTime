@@ -6,13 +6,14 @@ type ConfigureOptions = {
   systemPath : String,
   runnerCmd : String,
   safetyMargin : Float,
+  repetitions : Int,
   executionTimeFairness : Bool,
   particleFairness : Bool
 }
 
 let configureDefaultOptions = {
   systemPath = ".", runnerCmd = "", safetyMargin = 0.8,
-  executionTimeFairness = false, particleFairness = false
+  repetitions = 3, executionTimeFairness = false, particleFairness = false
 }
 
 let optionsConfig = [
@@ -25,6 +26,9 @@ let optionsConfig = [
   ( [("--safety-margin", " ", "<f>")]
   , "Specifies the safety margin ratio to determine the ratio of execution time that is used"
   , lam p. {p.options with safetyMargin = argToFloat p} ),
+  ( [("--repetitions", " ", "<reps>")]
+  , "Sets the number of times to re-run tasks when measuring the WCET"
+  , lam p. {p.options with repetitions = argToInt p} ),
   ( [("--execution-time-fairness", "", "")]
   , "Consider importance values in terms of execution time"
   , lam p. {p.options with executionTimeFairness = true} ),

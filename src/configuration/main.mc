@@ -36,7 +36,7 @@ iter
   tasks;
 flushStdout ();
 
-let confResult =
+let tasks =
   if options.particleFairness then
     -- NOTE(larshum, 2024-03-22): We normalize the importance values of the tasks
     -- to ensure we only consider the relative importance among tasks when deciding
@@ -88,7 +88,7 @@ let confResult =
         foldl
           (lam acc. lam t.
             let budget = addi t.budget (floorfi (mulf (int2float t.budget) lambda)) in
-            snoc acc (t.id, t.particles, budget))
+            snoc acc {t with budget = budget})
           acc coreTasks)
       [] tasksPerCore
   else
@@ -132,17 +132,14 @@ let confResult =
     configureTasksExecutionTimeFairness options g tasks
 in
 
-iter
-  (lam e.
-    match e with (taskId, particles, budget) in
-    let taskConfigFile = sysJoinPath options.systemPath (concat taskId ".config") in
-    let msg = join [int2string particles, " ", int2string budget, " 1"] in
-    writeFile taskConfigFile msg)
-  confResult;
-print "Configuration complete!\nThe tasks have been assigned the following number of particles:\n";
+-- Update the system specification file based on the final task configuration.
+writeTaskConfig options.systemPath tasks;
 
+print "Configuration complete!\nThe tasks have been assigned the following number of particles:\n";
 iter
-  (lam e.
-    match e with (taskId, particles, budget) in
+  (lam t.
+    match t with {id = taskId, particles = particles, budget = budget} in
     printLn (join [taskId, ": ", int2string particles, ", ", int2string budget]))
-  confResult
+  tasks;
+
+printLn (int2string (deref iters))
