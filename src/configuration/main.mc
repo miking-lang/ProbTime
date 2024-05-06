@@ -80,11 +80,12 @@ let tasks =
     mapFoldWithKey
       (lam acc. lam. lam coreTasks.
         -- NOTE(larshum, 2024-03-22): We set the importance of each task to its
-        -- budget, so that the budgets are scaled proportionally.
-        let coreTasks =
+        -- budget, so that the budgets are scaled proportionally, when
+        -- computing the lambda.
+        let coreTasksPrime =
           map (lam t. {t with importance = int2float t.budget}) coreTasks
         in
-        let lambda = computeLambda coreTasks in
+        let lambda = computeLambda coreTasksPrime in
         foldl
           (lam acc. lam t.
             let budget = addi t.budget (floorfi (mulf (int2float t.budget) lambda)) in

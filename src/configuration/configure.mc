@@ -132,7 +132,14 @@ let validateState = lam options. lam particleFairness. lam tasks.
     let wcets = repeatRunTasks options tasks in
     let tasksPerCore =
       foldl
-        (lam acc. lam t. mapInsertWith concat t.core [t] acc)
+        (lam acc. lam t.
+          let t =
+            match mapLookup t.id wcets with Some budget then
+              {t with budget = maxi t.budget budget}
+            else
+              error (concat "Found no WCET for task " t.id)
+          in
+          mapInsertWith concat t.core [t] acc)
         (mapEmpty subi) tasks
     in
     let tasksSchedulable =
