@@ -1,22 +1,24 @@
 # A consumer acting as the actuator output receiving data from task b.
+import json
 import signal
 import struct
 import sys
 import time
 
-fd = open("cf-out1", "rb")
-i = 0
+import mmio
 
 def sigint_handler(sig, frame):
-    fd.close()
     sys.exit(0)
-
 signal.signal(signal.SIGINT, sigint_handler)
-while True:
-    data = fd.read()
-    ofs = 0
-    while ofs < len(data):
-        sz, ts, payload = struct.unpack("=qqd", data[ofs:ofs+24])
-        print(f"Expected bias: {payload}")
-        ofs += 24
-    time.sleep(0.1)
+
+with open("system.json", "r") as f:
+    data = json.load(f)
+    buffer_size = data["compileopts"]["buffer-size"]
+
+with mmio.probtime_open("bias", buffer_size) as f:
+    while True:
+        msgs = f.read_messages()
+        for msg in msgs:
+            _, mu, sigma = struct.unpack("=qdd", msg)
+            print(f"Coin distribution: {mu} ± {sigma}")
+        time.sleep(0.1)

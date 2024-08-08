@@ -5,12 +5,15 @@ include "definitions.mc"
 type ConfigureOptions = {
   systemPath : String,
   runnerCmd : String,
-  budgetRatio : Float,
+  safetyMargin : Float,
+  repetitions : Int,
+  executionTimeFairness : Bool,
   particleFairness : Bool
 }
 
 let configureDefaultOptions = {
-  systemPath = ".", runnerCmd = "", budgetRatio = 0.9, particleFairness = false
+  systemPath = ".", runnerCmd = "", safetyMargin = 0.8,
+  repetitions = 3, executionTimeFairness = false, particleFairness = false
 }
 
 let optionsConfig = [
@@ -20,11 +23,17 @@ let optionsConfig = [
   ( [("--runner", " ", "<cmd>")]
   , "Sets the command used to run the whole ProbTime system (required)"
   , lam p. {p.options with runnerCmd = argToString p} ),
-  ( [("--budget-ratio", " ", "<f>")]
-  , "Specifies the ratio of the execution budgets to use (between zero and one) to control the margin of error"
-  , lam p. {p.options with budgetRatio = argToFloat p} ),
+  ( [("--safety-margin", " ", "<f>")]
+  , "Specifies the safety margin ratio to determine the ratio of execution time that is used"
+  , lam p. {p.options with safetyMargin = argToFloat p} ),
+  ( [("--repetitions", " ", "<reps>")]
+  , "Sets the number of times to re-run tasks when measuring the WCET"
+  , lam p. {p.options with repetitions = argToInt p} ),
+  ( [("--execution-time-fairness", "", "")]
+  , "Consider importance values in terms of execution time"
+  , lam p. {p.options with executionTimeFairness = true} ),
   ( [("--particle-fairness", "", "")]
-  , "Consider fairness values in terms of particle count rather than execution time budgets"
+  , "Consider importance values in terms of particle count"
   , lam p. {p.options with particleFairness = true} )
 ]
 
@@ -42,6 +51,12 @@ let parseConfigureOptions : () -> ConfigureOptions = lam.
   match result with ParseOK r then
     let o = r.options in
     if null o.runnerCmd then
+      printHelpMsgAndExit ()
+    else if xnor o.executionTimeFairness o.particleFairness then
+      print (join [
+        "Error: Use either --execution-time-fairness or --particle-fairness to ",
+        "choose fairness approach\n\n"
+      ]);
       printHelpMsgAndExit ()
     else o
   else argPrintError result; exit 1

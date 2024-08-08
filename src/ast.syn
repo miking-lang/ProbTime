@@ -9,6 +9,7 @@ type RtpplTop
 type RtpplTopParams
 type RtpplStmt
 type RtpplStmtNoIdent
+type RtpplPeriodic
 type RtpplExpr {grouping = "(" ")", }
 type RtpplExprNoIdent
 type RtpplType {grouping = "(" ")", }
@@ -89,7 +90,7 @@ prod ModelDef : RtpplTop =
   "{" body:{stmts:RtpplStmt* ("return" ret:RtpplExpr)?} "}"
 prod TemplateDef : RtpplTop =
   "template" id:UName "(" params:RtpplTopParams ")"
-  "{" body:{ports:RtpplPort* stmts:RtpplStmt*} "}"
+  "{" body:{ports:RtpplPort* init:RtpplStmt* periodic:RtpplPeriodic} "}"
 
 prod Params : RtpplTopParams =
   (params:{id:LName ":" ty:RtpplType} ("," params:{id:LName ":" ty:RtpplType})*)?
@@ -105,11 +106,12 @@ prod Degenerate : RtpplStmt = "degenerate"
 prod Resample : RtpplStmt = "resample"
 prod Read : RtpplStmt = "read" port:LIdent "to" (dst:LName ("." proj:LIdent)?)
 prod Write : RtpplStmt = "write" src:RtpplExpr "to" port:LIdent ("offset" delay:RtpplExpr)?
-prod Sdelay : RtpplStmt = "delay" e:RtpplExpr
 prod Condition : RtpplStmt =
   "if" cond:RtpplExpr ("update" id:LName)? "{" thn:RtpplStmt* "}" "else" "{" els:RtpplStmt* "}"
 prod ForLoop : RtpplStmt = "for" id:LName "in" e:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
 prod WhileLoop : RtpplStmt = "while" cond:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
+
+prod Periodic : RtpplPeriodic = "periodic" period:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
 
 prod IdentPlusStmt : RtpplStmt = id:LName next:RtpplStmtNoIdent
 prod Reassign : RtpplStmtNoIdent = ("." proj:LIdent)? "=" e:RtpplExpr
@@ -156,8 +158,8 @@ precedence {
 prod Main : RtpplMain =
   "system" "{" ext:RtpplExt* tasks:RtpplTask* connections:RtpplConnection* "}"
 
-prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType
-prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType
+prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
+prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
 
 prod Task : RtpplTask = "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")" "importance" p:Integer
 prod Connection : RtpplConnection = from:RtpplPortSpec "->" to:RtpplPortSpec

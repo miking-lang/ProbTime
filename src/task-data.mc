@@ -33,14 +33,14 @@ lang RtpplTaskPeriod = RtpplAst
     match mapLookup id argMap with Some expr then
       resolvePeriod info argMap expr
     else
-      errorSingle [info] "Could not resolve period of task"
+      errorSingle [info] "Could not determine the task period statically"
   | _ ->
-    errorSingle [info] "Could not resolve period of task"
+    errorSingle [info] "Could not determine the task period statically"
 
   sem findTaskTemplateData : Map Name TemplateData -> RtpplTop -> Map Name TemplateData
   sem findTaskTemplateData acc =
   | TemplateDefRtpplTop {id = {v = id}, body = b, params = params, info = info} ->
-    let period = findTaskTemplatePeriod info b.stmts in
+    let period = findTaskTemplatePeriod info b.periodic in
     let paramIds =
       match params with ParamsRtpplTopParams {params = params} then
         map (lam p. p.id.v) params
@@ -49,49 +49,33 @@ lang RtpplTaskPeriod = RtpplAst
     mapInsert id (period, paramIds) acc
   | _ -> acc
 
-  -- NOTE(larshum, 2023-08-28): We assume task templates are periodic and
-  -- defined in a particular shape, to simplify our analysis.
-  sem findTaskTemplatePeriod : Info -> [RtpplStmt] -> RtpplExpr
+  sem findTaskTemplatePeriod : Info -> RtpplPeriodic -> RtpplExpr
   sem findTaskTemplatePeriod info =
-  | _ ++ [WhileLoopRtpplStmt {
-      cond = LiteralRtpplExpr {const = LitBoolRtpplConst {value = {v = true}}},
-      body = body, info = info}] ->
-    match findLoopPeriod info (None ()) body with Some periodExpr then
-      periodExpr
-    else errorSingle [info] "Task template main loop is not periodic"
-  | _ ->
-    errorSingle [info] "Task template body does not end with an infinite loop"
-
-  sem findLoopPeriod : Info -> Option RtpplExpr -> [RtpplStmt] -> Option RtpplExpr
-  sem findLoopPeriod info acc =
-  | [h] ++ stmts ->
-    let acc =
-      match h with SdelayRtpplStmt {e = e} then
-        match acc with Some _ then
-          errorSingle [info] "Task template main loop is not periodic"
-        else
-          Some e
-      else acc
-    in
-    findLoopPeriod info acc stmts
-  | [] -> acc
+  | PeriodicRtpplPeriodic {period = period} -> period
 end
 
 lang RtpplTaskPriority = RtpplAst
-  sem findProgramTaskPriorities : RtpplProgram -> Map Name Int
+  sem findProgramTaskPriorities : RtpplProgram -> Map Name Float
   sem findProgramTaskPriorities =
   | ProgramRtpplProgram p ->
-    findTaskPriorities p.main
+    let priorities = findTaskPriorities p.main in
+    let sum = foldl addf 0.0 (mapValues priorities) in
+    mapMapWithKey (lam. lam p. normalizedPriority sum p) priorities
 
-  sem findTaskPriorities : RtpplMain -> Map Name Int
+  sem findTaskPriorities : RtpplMain -> Map Name Float
   sem findTaskPriorities =
   | MainRtpplMain {tasks = tasks} ->
     foldl findTaskPriority (mapEmpty nameCmp) tasks
 
-  sem findTaskPriority : Map Name Int -> RtpplTask -> Map Name Int
+  sem findTaskPriority : Map Name Float -> RtpplTask -> Map Name Float
   sem findTaskPriority priorities =
   | TaskRtpplTask {id = {v = id}, p = {v = priority}} ->
-    mapInsert id priority priorities
+    mapInsert id (int2float priority) priorities
+
+  sem normalizedPriority : Float -> Float -> Float
+  sem normalizedPriority prioritySum =
+  | priority ->
+    divf priority prioritySum
 end
 
 lang RtpplTaskInfers = RtpplAst
@@ -115,13 +99,17 @@ lang RtpplTaskInfers = RtpplAst
 
   sem countTemplateInfers : Map Name Int -> RtpplTop -> Map Name Int
   sem countTemplateInfers env =
-  | TemplateDefRtpplTop {id = {v = id}, body = {stmts = stmts}, info = info} ->
+  | TemplateDefRtpplTop {id = {v = id}, body = {periodic = periodic}, info = info} ->
     let maxInt = lam l. lam. lam r. if gti l r then l else r in
-    let infers = collectInfersFromStatements stmts in
+    let infers = collectInfersInPeriodic periodic in
     let count = addi (mapFoldWithKey maxInt 0 infers) 1 in
     mapInsert id count env
   | _ ->
     env
+
+  sem collectInfersInPeriodic : RtpplPeriodic -> Map Info Int
+  sem collectInfersInPeriodic =
+  | PeriodicRtpplPeriodic {body = body} -> collectInfersFromStatements body
 
   sem collectInfersFromStatements : [RtpplStmt] -> Map Info Int
   sem collectInfersFromStatements =
@@ -141,7 +129,7 @@ end
 lang RtpplTaskData = RtpplTaskPeriod + RtpplTaskPriority + RtpplTaskInfers
   type TaskData = {
     period : Int,
-    priority : Int
+    priority : Float
   }
 
   sem collectProgramTaskData : RtpplProgram -> Map Name TaskData

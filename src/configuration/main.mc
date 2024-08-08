@@ -11,32 +11,6 @@ include "definitions.mc"
 include "json-parse.mc"
 include "schedulable.mc"
 
-let cmpFloat : Float -> Float -> Int = lam l. lam r.
-  if gtf l r then 1 else if ltf l r then negi 1 else 0
-
-let loadTaskToCoreMapping = lam options. lam tasks.
-  let taskToCoreMap : Map String Int =
-    let ttcFile = sysJoinPath options.systemPath taskToCoreMappingFile in
-    if fileExists ttcFile then
-      foldl
-        (lam acc. lam line.
-          match strSplit " " line with [taskname, core] in
-          let coreIdx = string2int core in
-          mapInsert taskname coreIdx acc)
-        (mapEmpty cmpString)
-        (strSplit "\n" (strTrim (readFile ttcFile)))
-    else
-      error (join [
-        "The task-to-core mapping must be provided in a file '",
-        taskToCoreMappingFile, "'" ])
-  in
-  map
-    (lam t.
-      match mapLookup t.id taskToCoreMap with Some coreIdx then
-        {t with core = coreIdx}
-      else error (join ["Task ", t.id, " was not assigned to a core"]))
-    tasks
-
 let printNanosAsSeconds = lam ns.
   float2string (divf (int2float ns) 1e9)
 
@@ -55,7 +29,6 @@ match constructSystemDependencyGraph systemSpecJson with (tasks, g) in
 let tasks = mergeSort (lam l. lam r. subi l.period r.period) tasks in
 let tasks = mapi (lam i. lam t. {t with index = i}) tasks in
 
-let tasks = loadTaskToCoreMapping options tasks in
 print "Using the following task-to-core mapping\n";
 iter
   (lam t.
@@ -63,11 +36,17 @@ iter
   tasks;
 flushStdout ();
 
-let confResult =
+let tasks =
   if options.particleFairness then
+    -- NOTE(larshum, 2024-03-22): We normalize the importance values of the tasks
+    -- to ensure we only consider the relative importance among tasks when deciding
+    -- how to allocate particles.
+    let tasks = normalizeImportance tasks in
+
     -- 1. Find a multiple k such that all tasks use particles equal to k times
-    -- their importance value. We return the resulting particle counts and
-    -- budgets assigned based on our WCET estimates, with an extra margin on top.
+    -- their (normalized) importance value. We return the resulting particle
+    -- counts and budgets assigned based on our WCET estimates, with an extra
+    -- margin on top.
     let state = configureTasksParticleFairness options tasks in
 
     let tasksPerCore =
@@ -77,8 +56,9 @@ let confResult =
             optionGetOrElse (lam. error (join ["Could not find budget for task ", t.id]))
                             (mapLookup t.id state.wcets)
           in
-          let t = {t with budget = wcet, importance = wcet,
-                          particles = muli state.lowerBound t.importance}
+          let lb = int2float state.lowerBound in
+          let t = {t with budget = wcet,
+                          particles = floorfi (mulf lb t.importance)}
           in
           match mapLookup t.core acc with Some tasks then
             mapInsert t.core (snoc tasks t) acc
@@ -99,11 +79,17 @@ let confResult =
     -- able to happen in practice, given representative training data).
     mapFoldWithKey
       (lam acc. lam. lam coreTasks.
-        let lambda = computeLambda coreTasks in
+        -- NOTE(larshum, 2024-03-22): We set the importance of each task to its
+        -- budget, so that the budgets are scaled proportionally, when
+        -- computing the lambda.
+        let coreTasksPrime =
+          map (lam t. {t with importance = int2float t.budget}) coreTasks
+        in
+        let lambda = computeLambda coreTasksPrime in
         foldl
           (lam acc. lam t.
             let budget = addi t.budget (floorfi (mulf (int2float t.budget) lambda)) in
-            snoc acc (t.id, t.particles, budget))
+            snoc acc {t with budget = budget})
           acc coreTasks)
       [] tasksPerCore
   else
@@ -129,7 +115,7 @@ let confResult =
         (lam acc. lam. lam coreTasks.
           concat
             (map
-              (lam t. {t with budget = addi t.budget (floorfi (mulf (int2float t.importance) minLambda))})
+              (lam t. {t with budget = addi t.budget (floorfi (mulf t.importance minLambda))})
               coreTasks)
             acc)
         [] tasksPerCore
@@ -147,17 +133,14 @@ let confResult =
     configureTasksExecutionTimeFairness options g tasks
 in
 
-iter
-  (lam e.
-    match e with (taskId, particles, budget) in
-    let taskConfigFile = sysJoinPath options.systemPath (concat taskId ".config") in
-    let msg = join [int2string particles, " ", int2string budget, " 1"] in
-    writeFile taskConfigFile msg)
-  confResult;
-print "Configuration complete!\nThe tasks have been assigned the following number of particles:\n";
+-- Update the system specification file based on the final task configuration.
+writeTaskConfig options.systemPath tasks;
 
+print "Configuration complete!\nThe tasks have been assigned the following number of particles:\n";
 iter
-  (lam e.
-    match e with (taskId, particles, budget) in
+  (lam t.
+    match t with {id = taskId, particles = particles, budget = budget} in
     printLn (join [taskId, ": ", int2string particles, ", ", int2string budget]))
-  confResult
+  tasks;
+
+printLn (int2string (deref iters))

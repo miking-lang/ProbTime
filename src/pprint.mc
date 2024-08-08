@@ -31,12 +31,14 @@ lang RtpplPrettyPrint = RtpplAst
     join ["model ", nameGetStr id, "(", paramsStr, ") : ", pprintRtpplType ty,
           " {\n", stmtStrs, "\n", retStr, "\n}"]
   | TemplateDefRtpplTop {
-      id = {v = id}, params = params, body = {ports = ports, stmts = stmts}} ->
+      id = {v = id}, params = params,
+      body = {ports = ports, init = init, periodic = periodic}} ->
     let paramsStr = pprintRtpplParams params in
     let portsStr = strJoin "\n" (map pprintRtpplPort ports) in
-    let stmtStrs = strJoin "\n" (map (pprintRtpplStmt 2) stmts) in
+    let initStrs = strJoin "\n" (map (pprintRtpplStmt 2) init) in
+    let periodicStr = pprintRtpplPeriodic 2 periodic in
     join ["template ", nameGetStr id, "(", paramsStr, ") {\n",
-          portsStr, "\n", stmtStrs, "\n}"]
+          portsStr, "\n", initStrs, "\n", periodicStr, "\n}"]
 
   sem pprintRtpplReturn : Option RtpplExpr -> String
   sem pprintRtpplReturn =
@@ -69,8 +71,8 @@ lang RtpplPrettyPrint = RtpplAst
 
   sem pprintRtpplExt : RtpplExt -> String
   sem pprintRtpplExt =
-  | SensorRtpplExt {id = {v = id}, ty = ty} ->
-    join ["  sensor ", nameGetStr id, " : ", pprintRtpplType ty]
+  | SensorRtpplExt {id = {v = id}, ty = ty, r = r} ->
+    join ["  sensor ", nameGetStr id, " : ", pprintRtpplType ty, " maxrate ", pprintRtpplExpr 0 r]
   | ActuatorRtpplExt {id = {v = id}, ty = ty} ->
     join ["  actuator ", nameGetStr id, " : ", pprintRtpplType ty]
 
@@ -137,8 +139,6 @@ lang RtpplPrettyPrint = RtpplAst
       else ""
     in
     join [pprintIndent indent, "write ", pprintRtpplExpr indent src, " to ", portId, delayStr]
-  | SdelayRtpplStmt {e = e} ->
-    join [pprintIndent indent, "sdelay ", pprintRtpplExpr indent e]
   | ForLoopRtpplStmt {id = {v = id}, e = e, upd = upd, body = body} ->
     let updStr = pprintUpdateVar upd in
     let ii = pprintIndentIncrement indent in
@@ -168,6 +168,15 @@ lang RtpplPrettyPrint = RtpplAst
           pprintNewline indent, "} else {\n",
           strJoin "\n" (map (pprintRtpplStmt ii) els),
           pprintNewline indent, "}"]
+
+  sem pprintRtpplPeriodic : Int -> RtpplPeriodic -> String
+  sem pprintRtpplPeriodic indent =
+  | PeriodicRtpplPeriodic {period = period, upd = upd, body = body} ->
+    let ii = pprintIndentIncrement indent in
+    join [
+      pprintIndent indent, "periodic ", pprintRtpplExpr indent period,
+      pprintUpdateVar upd, " {\n",
+      strJoin "\n" (map (pprintRtpplStmt ii) body), pprintNewline indent, "}" ]
 
   sem pprintUpdateVar : Option {v : Name, i : Info} -> String
   sem pprintUpdateVar =

@@ -2,7 +2,7 @@ run: hello
 	python3 run.py
 
 hello: hello.rpl
-	rtppl --release $<
+	rtppl $<
 
 clean:
-	rm -f a a-in1 a-out1 a-co* b b-in1 b-out1 b-co* config.task* network.json
+	rm -rf a b *.collect a-in1 b-in1 dst system.json __pycache__

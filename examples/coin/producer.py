@@ -1,11 +1,12 @@
 # A producer of artificial coin-flip outcomes written to the cf task.
+import json
 import random
 import signal
 import struct
 import sys
 import time
 
-fd = open("cf-in1", "wb")
+import mmio
 
 # Models a biased coin which produces heads with probability 0.7
 def biased_coin():
@@ -23,16 +24,18 @@ def fair_coin():
         return 1.0
 
 def sigint_handler(sig, frame):
-    fd.close()
     sys.exit(0)
-
 signal.signal(signal.SIGINT, sigint_handler)
-while True:
-    sz = 16
-    ts = time.time_ns()
-    payload = biased_coin()
-    # payload = fair_coin()
-    msg = struct.pack("=qqd", sz, ts, payload)
-    fd.write(msg)
-    fd.flush()
-    time.sleep(0.3)
+
+with open("system.json", "r") as f:
+    data = json.load(f)
+    buffer_size = data["compileopts"]["buffer-size"]
+
+with mmio.probtime_open("cf-in1", buffer_size) as f:
+    while True:
+        ts = time.time_ns()
+        payload = biased_coin()
+        # payload = fair_coin()
+        msg = struct.pack("=qd", ts, payload)
+        f.write_message(msg)
+        time.sleep(0.3)

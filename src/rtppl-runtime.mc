@@ -1,5 +1,6 @@
 include "bool.mc"
 include "common.mc"
+include "json.mc"
 include "math.mc"
 include "string.mc"
 include "ext/file-ext.mc"
@@ -125,18 +126,17 @@ let sdelay =
   updateInputs ();
   overrun
 
--- NOTE(larshum, 2023-09-07): We use a hard-coded number of particles for all
--- infers that run outside of the main loop. We assume the task has sufficient
--- time to run these models within the execution time it is allocated.
-let rtpplFixedInferRunner = lam inferModel.
-  inferModel 100
+-- NOTE(larshum, 2024-04-17): For infers running outside of the periodic loop,
+-- we use a fixed number of particles determined via a command-line argument.
+let rtpplFixedInferRunner = lam pc. lam inferModel.
+  inferModel pc
 
 let rtpplMainInferRunner = lam inferModel.
   let p = deref particleCount in
   inferModel p
 
-let openFileDescriptor : String -> Int = lam file.
-  rtpplOpenFileDescriptor file
+let openFileDescriptor : String -> Int -> Int = lam file. lam bufsz.
+  rtpplOpenFileDescriptor file bufsz
 
 let closeFileDescriptor : Int -> () = lam fd.
   rtpplCloseFileDescriptor fd
@@ -149,6 +149,9 @@ let rtpplReadFloat = lam fd.
 
 let rtpplReadIntRecord = lam fd. lam nfields.
   rtpplReadIntRecord fd nfields
+
+let rtpplReadFloatRecord = lam fd. lam nfields.
+  rtpplReadFloatRecord fd nfields
 
 let rtpplReadDistFloat = lam fd.
   rtpplReadDistFloat fd
@@ -167,6 +170,10 @@ let rtpplWriteFloats =
 let rtpplWriteIntRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteIntRecord fd nfields msg) msgs
+
+let rtpplWriteFloatRecords =
+  lam fd. lam nfields. lam msgs.
+  iter (lam msg. rtpplWriteFloatRecord fd nfields msg) msgs
 
 let rtpplWriteDistFloats =
   lam fd. lam msgs.
@@ -189,23 +196,49 @@ let storeCollectedResults = lam taskId.
   let data = map int2string (snoc execTimes overran) in
   writeFile collectionFile (strJoin "\n" data)
 
+let getJsonValueExn = lam obj. lam id.
+  match obj with JsonObject vals then
+    match mapLookup id vals with Some v then
+      v
+    else error (concat "Could not find JSON field " id)
+  else error "Attempted to access field of JSON value of non-object type"
+
+let getJsonStringExn = lam obj. lam id.
+  match getJsonValueExn obj id with JsonString s then
+    s
+  else error (join ["Expected field ", id, " to be a string value"])
+
+let getJsonIntExn = lam obj. lam id.
+  match getJsonValueExn obj id with JsonInt n then
+    n
+  else error (join ["Expected field ", id, " to be an integer value"])
+
+let findTask = lam obj. lam taskId.
+  let isTaskObj = lam taskObj.
+    eqString (getJsonStringExn taskObj "id") taskId
+  in
+  match getJsonValueExn obj "tasks" with JsonArray vals then
+    match find isTaskObj vals with Some taskValue then
+      taskValue
+    else error (concat "Failed to find task " taskId)
+  else error "Could not find tasks list in JSON configuration"
+
+let readJsonConfig = lam configFile. lam taskId.
+  let config = jsonParseExn (readFile configFile) in
+  let jsonTask = findTask config taskId in
+  let numParticles = getJsonIntExn jsonTask "particles" in
+  let budget = getJsonIntExn jsonTask "budget" in
+  let slowdown = getJsonIntExn (getJsonValueExn config "config") "slowdown" in
+  (numParticles, budget, slowdown)
+
 let rtpplReadConfigurationFile = lam taskId.
-  let configFile = concat taskId ".config" in
+  let configFile = "system.json" in
   if fileExists configFile then
-    match map string2int (strSplit " " (strTrim (readFile configFile)))
-    with [p, budget, slowdown] then
-      Some (p, budget, slowdown)
-    else
-      None ()
-  else
-    None ()
+    readJsonConfig configFile taskId
+  else error (join ["Failed to read system configuration in '", configFile, "'"])
 
 let rtpplLoadConfiguration = lam taskId.
-  match
-    optionGetOrElse
-      (lam. (100, 0, 1))
-      (rtpplReadConfigurationFile taskId)
-  with (nparticles, budget, slowd) in
+  match rtpplReadConfigurationFile taskId with (nparticles, budget, slowd) in
   modref particleCount nparticles;
   modref taskBudget budget;
   modref slowdown slowd

@@ -1,11 +1,9 @@
 def f(data : [TSV(Float)]) : [Float] {
-  // For each input data, we read the float payload, add one to it, and store
-  // it in the output sequence.
-  var out = []
   // We declare that the 'out' variable is mutated inside the loop (push). The
   // loop iterates over the timestamped values of 'data' (messages with a
   // payload and an associated timestamp).
-  loop out for tsv in data {
+  var out = []
+  for tsv in data update out {
     var x = value(tsv) + 1.0
     out = push(out, x)
   }
@@ -20,22 +18,18 @@ template X(period : Int) {
   // of these expect floating-point payloads.
   input in1 : Float
   output out1 : Float
-  // We use a loop without condition to run the task template until explicitly
-  // terminated by the user.
-  loop {
-    // By using n delay in each iteration, we get a periodic task. The
-    // 'period' does not have to be a fixed value.
-    delay period
+  // Repeat code in the block with a periodic delay in-between
+  periodic period {
     read in1 to indata
-    loop for x in f(indata) {
+    for x in f(indata) {
       write x to out1
     }
   }
 }
 
 system {
-  sensor src : Float
-  actuator dst : Float
+  sensor src : Float rate 1s
+  actuator dst : Float rate 200ms
 
   task a = X(500ms) importance 1
   task b = X(250ms) importance 1

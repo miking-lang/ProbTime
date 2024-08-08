@@ -1,3 +1,6 @@
+include "math.mc"
+include "seq.mc"
+
 type TaskData = {
   -- The name of the task
   id : String,
@@ -8,7 +11,7 @@ type TaskData = {
 
   -- A measure of the task's importance relative to other tasks, used to guide
   -- the allocation of execution budgets.
-  importance : Int,
+  importance : Float,
 
   -- The number of particles used in the task.
   particles : Int,
@@ -28,10 +31,54 @@ type TaskData = {
 }
 
 let defaultTaskData = {
-  id = "", period = 0, importance = 1, particles = 1,
+  id = "", period = 0, importance = 1.0, particles = 1,
   budget = 0, core = 1, index = 0
 }
 
-let systemSpecFile = "network.json"
-let taskToCoreMappingFile = "task-core-map.txt"
-let defaultParticles = 100
+type PortSpec = {
+  srcId : String,
+  portId : Option String
+}
+
+let portSpecToString = lam ps.
+  match ps with {portId = Some portId} then
+    join [ps.srcId, "-", portId]
+  else
+    ps.srcId
+
+type Connection = {
+  from : PortSpec,
+  to : PortSpec,
+  messageBaseSize : Int,
+  messagePerParticleSize : Int,
+  messageFrequency : Float
+}
+
+let systemSpecFile = "system.json"
+
+let cmpFloat : Float -> Float -> Int = lam l. lam r.
+  if gtf l r then 1 else if ltf l r then negi 1 else 0
+
+let normalizeImportance = lam tasks.
+  let sum = foldl (lam acc. lam t. addf acc t.importance) 0.0 tasks in
+  map (lam t. {t with importance = divf t.importance sum}) tasks
+
+mexpr
+
+utest
+  let t = [defaultTaskData, defaultTaskData] in
+  map (lam t. t.importance) (normalizeImportance t)
+with [0.5, 0.5]
+using eqSeq (eqfApprox 1e-5) in
+
+utest
+  let t = [
+    defaultTaskData,
+    {defaultTaskData with importance = 1.5},
+    {defaultTaskData with importance = 2.5}
+  ] in
+  map (lam t. t.importance) (normalizeImportance t)
+with [0.2, 0.3, 0.5]
+using eqSeq (eqfApprox 1e-5) in
+
+()

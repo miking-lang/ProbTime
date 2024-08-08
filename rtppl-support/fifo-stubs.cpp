@@ -20,8 +20,6 @@ struct file_buffer {
   int64_t sz;
 };
 
-const int64_t BUFFER_SIZE = 1<<22;
-
 std::map<int, file_buffer> buffers;
 
 struct payload {
@@ -106,8 +104,9 @@ inline int64_t timespec_value_to_int64(value ts) {
 
 extern "C" {
 
-  value open_file_nonblocking_stub(value file) {
-    CAMLparam1(file);
+  value open_file_nonblocking_stub(value file, value bufsz) {
+    CAMLparam2(file, bufsz);
+    int64_t buffer_size = Long_val(bufsz);
     const char *name = String_val(file);
     int n = strlen(name) + 2;
     char *id = (char*)malloc(n);;
@@ -118,11 +117,11 @@ extern "C" {
       fprintf(stderr, "Could not open shared memory object %s: %s\n", id, strerror(errno));
       exit(1);
     }
-    if (ftruncate(fd, BUFFER_SIZE) == -1) {
+    if (ftruncate(fd, buffer_size) == -1) {
       fprintf(stderr, "Error while creating memory buffer for %s: %s\n", id, strerror(errno));
       exit(1);
     }
-    void *ptr = mmap(NULL, BUFFER_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    void *ptr = mmap(NULL, buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (ptr == MAP_FAILED) {
       fprintf(stderr, "Error while mapping file %s to memory: %s\n", id, strerror(errno));
       exit(1);
@@ -131,7 +130,7 @@ extern "C" {
     buf.id = id;
     buf.start = (char*)ptr;
     buf.pos = (char*)ptr;
-    buf.sz = BUFFER_SIZE;
+    buf.sz = buffer_size;
     buffers[fd] = buf;
     CAMLreturn(Val_int(fd));
   }
@@ -272,6 +271,61 @@ extern "C" {
       int64_t v = Long_val(Field(entry, i));
       memcpy(ptr, (void*)&v, sizeof(int64_t));
       ptr += sizeof(int64_t);
+    }
+    write_message(Int_val(fd), p);
+    free(p.data);
+    CAMLreturn0;
+  }
+
+  value rtppl_read_float_record_stub(value fd, value nfields_val) {
+    CAMLparam2(fd, nfields_val);
+    CAMLlocal3(out, tsv, entry);
+    int64_t nfields = Long_val(nfields_val);
+    std::vector<payload> input_seq = read_messages(Int_val(fd));
+    out = caml_alloc(input_seq.size(), 0);
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      caml_initialize(&Field(out, i), Val_unit);
+    }
+    for (size_t i = 0; i < input_seq.size(); i++) {
+      const payload &p = input_seq[i];
+      int64_t ts;
+      tsv = caml_alloc(2, 0);
+      char *ptr = p.data;
+      memcpy(&ts, ptr, sizeof(int64_t));
+      ptr += sizeof(int64_t);
+      Store_field(tsv, 0, to_timespec_value(ts));
+      entry = caml_alloc(nfields, 0);
+      for (size_t j = 0; j < nfields; j++) {
+        caml_initialize(&Field(entry, j), Val_unit);
+      }
+      for (size_t j = 0; j < nfields; j++) {
+        double v;
+        memcpy(&v, ptr, sizeof(double));
+        ptr += sizeof(double);
+        Store_field(entry, j, caml_copy_double(v));
+      }
+      Store_field(tsv, 1, entry);
+      Store_field(out, i, tsv);
+    }
+    CAMLreturn(out);
+  }
+
+  void rtppl_write_float_record_stub(value fd, value nfields_val, value tsv) {
+    CAMLparam3(fd, nfields_val, tsv);
+    int64_t nfields = Long_val(nfields_val);
+    payload p;
+    p.size = sizeof(int64_t) + nfields * sizeof(double);
+    p.data = (char*)malloc(p.size);
+    char *ptr = p.data;
+    value ts = Field(tsv, 0);
+    int64_t timestamp = timespec_value_to_int64(ts);
+    memcpy(ptr, (void*)&timestamp, sizeof(int64_t));
+    ptr += sizeof(int64_t);
+    value entry = Field(tsv, 1);
+    for (size_t i = 0; i < nfields; i++) {
+      double v = Double_val(Field(entry, i));
+      memcpy(ptr, (void*)&v, sizeof(double));
+      ptr += sizeof(double);
     }
     write_message(Int_val(fd), p);
     free(p.data);

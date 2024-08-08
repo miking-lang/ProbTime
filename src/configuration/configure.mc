@@ -3,7 +3,9 @@ include "digraph.mc"
 include "map.mc"
 include "sys.mc"
 
+include "buffers.mc"
 include "definitions.mc"
+include "json-parse.mc"
 include "regression.mc"
 include "schedulable.mc"
 
@@ -15,14 +17,17 @@ type TaskConfigState = {
   finished : Bool
 }
 
+let iters = ref 0
+
 let defaultUpperBound = floorfi 1e10
 
-let writeTaskConfig = lam path. lam task.
-  let taskConfigFile = sysJoinPath path (concat task.id ".config") in
-  -- NOTE(larshum, 2023-10-17): When configuring tasks, we always assume a
-  -- slowdown factor of 1, i.e., that we are replaying data in real-time.
-  let msg = join [int2string task.particles, " ", int2string task.budget, " 1"] in
-  writeFile taskConfigFile msg
+let writeTaskConfig = lam path. lam tasks.
+  let systemConfigFile = sysJoinPath path systemSpecFile in
+  let updJson =
+    let json = parseSystemSpecJson systemConfigFile in
+    updateTasks json tasks
+  in
+  writeFile systemConfigFile (json2string updJson)
 
 let readTaskCollect = lam path. lam taskId.
   let taskCollectFile = sysJoinPath path (concat taskId ".collect") in
@@ -46,16 +51,12 @@ let readTaskCollect = lam path. lam taskId.
 let runTasks : String -> String -> [TaskData] -> Map String Int =
   lam path. lam runner. lam tasks.
 
-  -- 1. Write the number of particles to use to the configuration file the
-  -- respective task.
-  iter (lam t. writeTaskConfig path t) tasks;
-
-  -- 2. Invoke the runner.
+  -- Invoke the runner.
   let result = sysRunCommand [runner] "" "." in
 
-  -- 3. Return the WCET estimtates for each task, if the runner exited with
-  -- code zero. Otherwise, we report an error and print stdout/stderr.
-  -- If any task overran its period, we report this by setting the WCET to 0.
+  -- Return the WCET estimtates for each task, if the runner exited with code
+  -- zero. Otherwise, we report an error and print stdout/stderr. If any task
+  -- overran its period, we report this by setting the WCET to 0.
   if eqi result.returncode 0 then
     foldl
       (lam acc. lam t.
@@ -69,6 +70,37 @@ let runTasks : String -> String -> [TaskData] -> Map String Int =
       "stdout:\n", result.stdout, "\nstderr:\n", result.stderr, "\n"
     ] in
     error msg
+
+-- Repeatedly run tasks for a given number of times, and return the maximum
+-- observed WCET for each task.
+let repeatRunTasks : ConfigureOptions -> [TaskData] -> Map String Int =
+  lam options. lam tasks.
+
+  -- Increase the number of iterations by one
+  modref iters (addi (deref iters) 1);
+
+  -- Update the particle count of all tasks in the configuration file.
+  writeTaskConfig options.systemPath tasks;
+
+  -- Verify that the buffer size is sufficient for all connections.
+  verifyBufferSizes options.systemPath;
+
+  -- Repeatedly run the tasks while collecting their WCETs
+  let res =
+    create options.repetitions
+      (lam. runTasks options.systemPath options.runnerCmd tasks)
+  in
+
+  -- Compute the WCET among all runs for each task
+  foldl
+    (lam acc. lam wcets.
+      mapMerge
+        (lam lhs. lam rhs.
+          match (lhs, rhs) with (Some l, Some r) then
+            Some (maxi l r)
+          else error "Incompatible results from runTasks")
+        acc wcets)
+    (head res) (tail res)
 
 let tasksWithParticleCounts = lam tasks. lam taskMap.
   map
@@ -95,6 +127,46 @@ let maxObsIntercept = lam slope. lam observations.
       maxf ofs maxOfs)
     0.0 observations
 
+let validateState = lam options. lam particleFairness. lam tasks.
+  let validatePf = lam tasks.
+    let wcets = repeatRunTasks options tasks in
+    let tasksPerCore =
+      foldl
+        (lam acc. lam t.
+          let t =
+            match mapLookup t.id wcets with Some budget then
+              {t with budget = maxi t.budget budget}
+            else
+              error (concat "Found no WCET for task " t.id)
+          in
+          mapInsertWith concat t.core [t] acc)
+        (mapEmpty subi) tasks
+    in
+    let tasksSchedulable =
+      mapFoldWithKey
+        (lam acc. lam. lam coreTasks.
+          if acc then schedulable coreTasks else false)
+        true tasksPerCore
+    in
+    if tasksSchedulable then () else
+    error (join [
+      "Initial task configuration is not schedulable - ",
+      "try adjusting the importance values"
+    ])
+  in
+  let validateEt = lam tasks.
+    let tasks = map (lam t. {t with particles = 1}) tasks in
+    let wcets = repeatRunTasks options tasks in
+    iter
+      (lam t.
+        match mapLookup t.id wcets with Some wcet then
+          if or (eqi t.budget 0) (leqi wcet t.budget) then () else
+          error (join ["Task ", t.id, " was assigned an insufficient budget"])
+        else ())
+      tasks
+  in
+  (if particleFairness then validatePf else validateEt) tasks
+
 let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
   recursive let work = lam g. lam state.
     let g =
@@ -110,23 +182,15 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
     in
     if eqi (digraphCountVertices g) 0 then
       map
-        (lam task.
-          match task with (taskId, {particles = p, budget = b}) in
-          (taskId, p, b))
-        (mapBindings state)
+        (lam t.
+          match mapLookup t.id state with Some td then
+            {t with particles = td.particles, budget = td.budget}
+          else error "Could not look up task in state")
+        tasks
     else
       let wcets =
         let twpc = tasksWithParticleCounts tasks state in
-        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd twpc) in
-        foldl
-          (lam acc. lam wcets.
-            mapMerge
-              (lam lhs. lam rhs.
-                match (lhs, rhs) with (Some l, Some r) then
-                  Some (maxi l r)
-                else error "Incompatible results from runTasks")
-              acc wcets)
-          (head res) (tail res)
+        repeatRunTasks options twpc
       in
       -- NOTE(larshum, 2023-10-12): If a task we had already fixed the number
       -- of particles for overruns, we need to re-configure it and all tasks
@@ -137,7 +201,10 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
             match acc with (state, overran) in
             match (mapLookup task.id state, mapLookup task.id wcets)
             with (Some ts, Some wcet) then
-              if and ts.finished (gti wcet task.budget) then
+              -- NOTE(larshum, 2024-03-20): A task has budget zero if its
+              -- importance is zero. In this case, we ignore any overruns as
+              -- these tasks are irrelevant to the configuration.
+              if and (gti task.budget 0) (and ts.finished (gti wcet task.budget)) then
                 printLn (join [
                   "Fixed task ", task.id, " overran; wcet=", int2string wcet,
                   ", budget=", int2string task.budget]);
@@ -203,7 +270,7 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
                   -- "skip" configuration of tasks that perform no inference.
                   if eqi task.budget 0 then {task with finished = true}
                   else if lti (addi task.lowerBound 1) task.upperBound then
-                    let safeBudget = floorfi (mulf (int2float task.budget) options.budgetRatio) in
+                    let safeBudget = floorfi (mulf (int2float task.budget) options.safetyMargin) in
                     let task =
                       if gti wcet safeBudget then
                         {task with upperBound = task.particles}
@@ -226,11 +293,12 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
         in
         work g state
   in
+  validateState options false tasks;
   let state =
     foldl
       (lam state. lam task.
         let taskState =
-          { particles = task.particles, budget = task.budget
+          { particles = 1, budget = task.budget
           , lowerBound = 1, upperBound = defaultUpperBound
           , finished = false }
         in
@@ -238,7 +306,9 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
       (mapEmpty cmpString)
       tasks
   in
-  work taskGraph state
+  let res = work taskGraph state in
+  validateState options false res;
+  res
 
 let configureTasksParticleFairness = lam options. lam tasks.
   recursive let findMaximumConstantFactor = lam state.
@@ -250,26 +320,19 @@ let configureTasksParticleFairness = lam options. lam tasks.
           divi (addi state.lowerBound state.upperBound) 2
       in
       let wcets =
-        let tasks = map (lam t. {t with particles = muli k t.importance}) tasks in
+        let tasks =
+          map (lam t. {t with particles = roundfi (mulf (int2float k) t.importance)}) tasks
+        in
         -- NOTE(larshum, 2023-10-14): We repeat the estimations three times and
         -- taking the maximum WCET among the runs for each task.
-        let res = create 3 (lam. runTasks options.systemPath options.runnerCmd tasks) in
-        foldl
-          (lam acc. lam wcets.
-            mapMerge
-              (lam lhs. lam rhs.
-                match (lhs, rhs) with (Some l, Some r) then
-                  Some (maxi l r)
-                else error "Incompatible results from runTasks")
-              acc wcets)
-          (head res) (tail res)
+        repeatRunTasks options tasks
       in
       let updState =
         let wcets =
           mapMerge
             (lam l. lam r.
               match (l, r) with (_, Some wcet) then
-                Some (floorfi (divf (int2float wcet) options.budgetRatio))
+                Some (floorfi (divf (int2float wcet) options.safetyMargin))
               else
                 error "Missing worst-case execution time for task")
             state.wcets wcets
@@ -285,10 +348,7 @@ let configureTasksParticleFairness = lam options. lam tasks.
               else
                 error (concat "Found no WCET for task " t.id)
             in
-            match mapLookup t.core tasksPerCore with Some coreTasks then
-              mapInsert t.core (snoc coreTasks t) tasksPerCore
-            else
-              mapInsert t.core [t] tasksPerCore)
+            mapInsertWith concat t.core [t] tasksPerCore)
           (mapEmpty subi) tasks
       in
       let tasksSchedulable =
@@ -306,10 +366,32 @@ let configureTasksParticleFairness = lam options. lam tasks.
       findMaximumConstantFactor state
     else state
   in
-  let initState =
-    {lowerBound = 1, upperBound = defaultUpperBound, wcets = mapEmpty cmpString}
+  -- NOTE(larshum, 2024-03-22): We compute the lower bound as the lowest
+  -- initial value for which all tasks are allocated at least one particle.
+  let minK = lam t.
+    if eqf t.importance 0.0 then 0.0
+    else divf 1.0 t.importance
   in
-  findMaximumConstantFactor initState
+  match max cmpFloat (map minK tasks) with Some k then
+    let initState =
+      {lowerBound = ceilfi k, upperBound = defaultUpperBound, wcets = mapEmpty cmpString}
+    in
+    let initialTasks =
+      map (lam t. {t with particles = roundfi (mulf k t.importance)}) tasks
+    in
+    validateState options true initialTasks;
+    let res = findMaximumConstantFactor initState in
+    let finalTasks =
+      map
+        (lam t.
+          let p = roundfi (mulf (int2float res.lowerBound) t.importance) in
+          {t with particles = p})
+        tasks
+    in
+    validateState options true finalTasks;
+    res
+  else
+    error "Cannot configure an empty list of tasks"
 
 mexpr
 
