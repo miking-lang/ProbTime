@@ -22,8 +22,7 @@ let _rts = lam.
   use LoadRuntime in
   let _bpf = BPF {particles = int_ 1} in
   let _bpfRtEntry = loadRuntimeEntry _bpf "smc-bpf/runtime.mc" in
-  let _defaultRuntimes = mapFromSeq cmpInferMethod [(_bpf, _bpfRtEntry)] in
-  combineRuntimes default _defaultRuntimes
+  combineInferRuntimes default (mapFromSeq cmpInferMethod [(_bpf, _bpfRtEntry)])
 
 lang RtpplJson = RtpplAst + RtpplTaskData + RtpplConnectionData
   type RtpplNames = {

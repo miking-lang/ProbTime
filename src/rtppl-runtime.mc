@@ -75,11 +75,11 @@ let slowdown : Ref Int = ref 1
 -- Delays execution by a given amount of nanoseconds, given a reference
 -- containing the start time of the current timing point. The result is an
 -- integer denoting the number of nanoseconds of overrun.
-let delayBy : Int -> Int = lam delay.
+let delayBy : Int -> Int = lam delayNs.
   let oldPriority = rtpplSetMaxPriority () in
-  let logicalIntervalTime = nanosToTimespec delay in
-  let delay = muli delay (deref slowdown) in
-  let intervalTime = nanosToTimespec delay in
+  let logicalIntervalTime = nanosToTimespec delayNs in
+  let adjustedDelay = muli delayNs (deref slowdown) in
+  let intervalTime = nanosToTimespec adjustedDelay in
   let endTime = getMonotonicTime () in
   let elapsedTime = diffTimespec endTime (deref monoLogicalTime) in
   let waitTime = addTimespec (deref monoLogicalTime) intervalTime in
@@ -119,10 +119,10 @@ let writeCollectionMessage = lam.
 let sdelay =
   lam flushOutputs : () -> ().
   lam updateInputs : () -> ().
-  lam delay : Int.
+  lam delayNs : Int.
   flushOutputs ();
   writeCollectionMessage ();
-  let overrun = delayBy delay in
+  let overrun = delayBy delayNs in
   updateInputs ();
   overrun
 
