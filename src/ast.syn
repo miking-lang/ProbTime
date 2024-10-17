@@ -9,7 +9,6 @@ type RtpplTop
 type RtpplTopParams
 type RtpplStmt
 type RtpplStmtNoIdent
-type RtpplPeriodic
 type RtpplExpr {grouping = "(" ")", }
 type RtpplExprNoIdent
 type RtpplType {grouping = "(" ")", }
@@ -90,7 +89,7 @@ prod ModelDef : RtpplTop =
   "{" body:{stmts:RtpplStmt* ("return" ret:RtpplExpr)?} "}"
 prod TemplateDef : RtpplTop =
   "template" id:UName "(" params:RtpplTopParams ")"
-  "{" body:{ports:RtpplPort* init:RtpplStmt* periodic:RtpplPeriodic} "}"
+  "{" body:{ports:RtpplPort* body:RtpplStmt*} "}"
 
 prod Params : RtpplTopParams =
   (params:{id:LName ":" ty:RtpplType} ("," params:{id:LName ":" ty:RtpplType})*)?
@@ -101,17 +100,16 @@ prod Output : RtpplPort = "output" id:LIdent ":" ty:RtpplType
 prod Binding : RtpplStmt = "var" id:LName (":" ty:RtpplType)? "=" e:RtpplExpr
 prod Observe : RtpplStmt = "observe" e:RtpplExpr "~" d:RtpplExpr
 prod Assume : RtpplStmt = "sample" id:LName "~" d:RtpplExpr
-prod Infer : RtpplStmt = "infer" model:RtpplExpr "to" id:LName
+prod Infer : RtpplStmt = "infer" model:RtpplExpr "to" id:LName ("particles" p:RtpplExpr)?
 prod Degenerate : RtpplStmt = "degenerate"
 prod Resample : RtpplStmt = "resample"
 prod Read : RtpplStmt = "read" port:LIdent "to" (dst:LName ("." proj:LIdent)?)
 prod Write : RtpplStmt = "write" src:RtpplExpr "to" port:LIdent ("offset" delay:RtpplExpr)?
 prod Condition : RtpplStmt =
   "if" cond:RtpplExpr ("update" id:LName)? "{" thn:RtpplStmt* "}" "else" "{" els:RtpplStmt* "}"
+prod Delay : RtpplStmt = "delay" ns:RtpplExpr
 prod ForLoop : RtpplStmt = "for" id:LName "in" e:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
 prod WhileLoop : RtpplStmt = "while" cond:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
-
-prod Periodic : RtpplPeriodic = "periodic" period:RtpplExpr ("update" upd:LName)? "{" body:RtpplStmt* "}"
 
 prod IdentPlusStmt : RtpplStmt = id:LName next:RtpplStmtNoIdent
 prod Reassign : RtpplStmtNoIdent = ("." proj:LIdent)? "=" e:RtpplExpr

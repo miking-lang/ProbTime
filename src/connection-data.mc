@@ -215,10 +215,9 @@ lang RtpplConnectionMessageFrequency = RtpplConnectionBase + RtpplTaskPeriod
   sem countTemplatePortWrites : Map Name (Map String PortFreq) -> RtpplTop
                              -> Map Name (Map String PortFreq)
   sem countTemplatePortWrites acc =
-  | TemplateDefRtpplTop {id = {v = id}, body = {periodic = periodic}, info = info} ->
+  | TemplateDefRtpplTop {id = {v = id}, body = {body = body}, info = info} ->
     let templatePortWrites =
-      sfold_RtpplPeriodic_RtpplStmt
-        countTemplatePortWritesStmt (mapEmpty cmpString) periodic
+      foldl countTemplatePortWritesStmt (mapEmpty cmpString) body
     in
     mapInsert id templatePortWrites acc
   | _ ->

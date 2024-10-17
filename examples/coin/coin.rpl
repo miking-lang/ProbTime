@@ -57,7 +57,8 @@ template CoinFlip() {
 
   // We use 'd' in the loop to indicate that its updated values should be made
   // visible to later iterations of the loop.
-  periodic 1s update d {
+  while true update d {
+    delay 1s
     read in1 to indata
     printInput(indata)
 
@@ -66,7 +67,7 @@ template CoinFlip() {
     // will infer as many particles as we have time for during the given
     // budget. However, this does not work well for simple models as this one,
     // as the number of particles grows too large.
-    infer coinFlipModel(d, indata) to d
+    infer coinFlipModel(d, indata) to d particles 100
 
     // We write the expected value and the standard deviation of the empirical
     // distribution to the output port.

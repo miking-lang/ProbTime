@@ -32,13 +32,12 @@ lang RtpplPrettyPrint = RtpplAst
           " {\n", stmtStrs, "\n", retStr, "\n}"]
   | TemplateDefRtpplTop {
       id = {v = id}, params = params,
-      body = {ports = ports, init = init, periodic = periodic}} ->
+      body = {ports = ports, body = body}} ->
     let paramsStr = pprintRtpplParams params in
     let portsStr = strJoin "\n" (map pprintRtpplPort ports) in
-    let initStrs = strJoin "\n" (map (pprintRtpplStmt 2) init) in
-    let periodicStr = pprintRtpplPeriodic 2 periodic in
+    let bodyStrs = strJoin "\n" (map (pprintRtpplStmt 2) body) in
     join ["template ", nameGetStr id, "(", paramsStr, ") {\n",
-          portsStr, "\n", initStrs, "\n", periodicStr, "\n}"]
+          portsStr, "\n", bodyStrs, "\n}"]
 
   sem pprintRtpplReturn : Option RtpplExpr -> String
   sem pprintRtpplReturn =
@@ -119,10 +118,14 @@ lang RtpplPrettyPrint = RtpplAst
     join [pprintIndent indent, "observe ", pprintRtpplExpr ii e, " ~ ", pprintRtpplExpr ii d]
   | AssumeRtpplStmt {id = {v = id}, d = d} ->
     join [pprintIndent indent, "assume ", nameGetStr id, " ~ ", pprintRtpplExpr indent d]
-  | InferRtpplStmt {id = {v = id}, model = model} ->
+  | InferRtpplStmt {id = {v = id}, model = model, p = p} ->
     let ii = pprintIndentIncrement indent in
-    join [ pprintIndent indent, "infer ", pprintRtpplExpr ii model
-         , " to ", nameGetStr id ]
+    let header =
+      join [ pprintIndent indent, "infer ", pprintRtpplExpr ii model
+           , " to ", nameGetStr id ]
+    in
+    match p with Some p then join [header, " particles ", pprintRtpplExpr ii p]
+    else header
   | DegenerateRtpplStmt _ ->
     join [pprintIndent indent, "degenerate"]
   | ResampleRtpplStmt _ ->
@@ -152,6 +155,8 @@ lang RtpplPrettyPrint = RtpplAst
     join [
       pprintIndent indent, "while ", pprintRtpplExpr indent cond, " {\n",
       strJoin "\n" (map (pprintRtpplStmt ii) body), pprintNewline indent, "}"]
+  | DelayRtpplStmt {ns = ns} ->
+    join [pprintIndent indent, "delay ", pprintRtpplExpr indent ns]
   | IdentPlusStmtRtpplStmt {id = {v = id}, next = ReassignRtpplStmtNoIdent {proj = None _, e = e}} ->
     join [pprintIndent indent, nameGetStr id, " = ", pprintRtpplExpr indent e]
   | IdentPlusStmtRtpplStmt {id = {v = id}, next = ReassignRtpplStmtNoIdent {proj = Some {v = pid}, e = e}} ->
@@ -168,15 +173,6 @@ lang RtpplPrettyPrint = RtpplAst
           pprintNewline indent, "} else {\n",
           strJoin "\n" (map (pprintRtpplStmt ii) els),
           pprintNewline indent, "}"]
-
-  sem pprintRtpplPeriodic : Int -> RtpplPeriodic -> String
-  sem pprintRtpplPeriodic indent =
-  | PeriodicRtpplPeriodic {period = period, upd = upd, body = body} ->
-    let ii = pprintIndentIncrement indent in
-    join [
-      pprintIndent indent, "periodic ", pprintRtpplExpr indent period,
-      pprintUpdateVar upd, " {\n",
-      strJoin "\n" (map (pprintRtpplStmt ii) body), pprintNewline indent, "}" ]
 
   sem pprintUpdateVar : Option {v : Name, i : Info} -> String
   sem pprintUpdateVar =

@@ -392,7 +392,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
         ty = _tyuk info, info = info } )
   | TemplateDefRtpplTop {
       id = {v = id}, params = params,
-      body = {ports = ports, init = init, periodic = periodic}, info = info} ->
+      body = {ports = ports, body = body}, info = info} ->
     let params = compileParams params in
     let ty = UnitRtpplType {info = info} in
     let tyAnnot = foldl addParamTypeAnnot (compileRtpplType ty) params in
@@ -402,33 +402,18 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     -- Template functions may only be used from main, so we make sure to escape
     -- their names there as well.
     let escapedId = _rtpplEscapeName id in
-    let infers = collectInfersInPeriodic periodic in
-    let maxInferInfo =
-      match max (lam x. lam y. subi x.1 y.1) (mapBindings infers) with Some e then
-        e.0
-      else
-        NoInfo ()
-    in
-    let env = {env with topId = id, mainInferInfo = maxInferInfo} in
-    let env = foldl buildPortTypesMap env ports in
-    let body = bindall_
-      (snoc (map (compileRtpplStmt env) init)
-            (compileRtpplPeriodic env periodic)) in
-    ( env
-    , TmLet {
-        ident = escapedId, tyAnnot = tyAnnot, tyBody = _tyuk info,
-        body = foldl addParamToBody body params, inexpr = uunit_,
-        ty = _tyuk info, info = info } )
-
-  -- Constructs a mapping from each infer used within a given statement to a
-  -- distinct integer index.
-  sem mapInfersToIndex : (Int, Map Info Int) -> RtpplStmt -> (Int, Map Info Int)
-  sem mapInfersToIndex acc =
-  | InferRtpplStmt {info = info} ->
-    match acc with (nextIdx, inferMap) in
-    (addi nextIdx 1, mapInsert info nextIdx inferMap)
-  | stmt ->
-    sfold_RtpplStmt_RtpplStmt mapInfersToIndex acc stmt
+    let inferInfos = mapKeys (collectInfersWithoutParticles body) in
+    match inferInfos with [] | [_] then
+      let env = {env with topId = id} in
+      let env = foldl buildPortTypesMap env ports in
+      let body = bindall_ (map (compileRtpplStmt env) body) in
+      ( env
+      , TmLet {
+          ident = escapedId, tyAnnot = tyAnnot, tyBody = _tyuk info,
+          body = foldl addParamToBody body params, inexpr = uunit_,
+          ty = _tyuk info, info = info } )
+    else
+      errorSingle inferInfos "Cannot compile task with multiple infers with unknown particle count"
 
   sem compileRtpplReturnExpr : Info -> Option RtpplExpr -> Expr
   sem compileRtpplReturnExpr info =
@@ -497,19 +482,19 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       ident = id, tyAnnot = _tyuk info, tyBody = _tyuk info,
       body = TmAssume { dist = compileRtpplExpr d, ty = _tyuk info, info = info },
       inexpr = uunit_, ty = _tyuk info, info = info }
-  | InferRtpplStmt {id = {v = id}, model = model, info = info} ->
+  | InferRtpplStmt {id = {v = id}, model = model, p = p, info = info} ->
+    -- If the user explicitly specified the number of particles, we use the
+    -- infer runner with a fixed particle count. Otherwise, use the
+    -- version with a configurable particle count.
     let inferFunc =
       let rtids = getRuntimeIds () in
-      if eqi (infoCmp info env.mainInferInfo) 0 then
-        _variable info rtids.mainInferRunner
-      else
+      match p with Some p then
         TmApp {
           lhs = _variable info rtids.fixedInferRunner,
-          rhs = TmConst {
-            val = CInt {val = env.options.defaultParticles}, ty = _tyuk info,
-            info = info
-          },
-          ty = _tyuk info, info = info}
+          rhs = compileRtpplExpr p,
+          ty = _tyuk info, info = info }
+      else
+        _variable info rtids.mainInferRunner
     in
     let inferModelBind = TmLet {
       ident = nameNoSym "inferModel", tyAnnot = _tyuk info, tyBody = _tyuk info,
@@ -644,6 +629,11 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     } in
     TmRecLets {
       bindings = [recBind], inexpr = resultBind, ty = _tyuk info, info = info }
+  | DelayRtpplStmt {ns = ns, info = info} ->
+    TmLet {
+      ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
+      body = TmSdelay {e = compileRtpplExpr ns, ty = _tyuk info, info = info},
+      inexpr = uunit_, ty = _tyuk info, info = info }
   | ConditionRtpplStmt {
       id = condVar, cond = cond, thn = thn, els = els, info = info } ->
     let tailExpr =
@@ -690,41 +680,6 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
     TmLet {
       ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyunit info,
       body = funCallExpr, inexpr = uunit_, ty = _tyuk info, info = info }
-
-  sem compileRtpplPeriodic : RtpplTopEnv -> RtpplPeriodic -> Expr
-  sem compileRtpplPeriodic env =
-  | PeriodicRtpplPeriodic {
-      period = period, upd = loopVar, body = body, info = info} ->
-    let loopId = nameSym "periodicFn" in
-    let initialDelay = TmLet {
-      ident = nameNoSym "", tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmSdelay { e = compileRtpplExpr period, ty = _tyuk info, info = info },
-      inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    match
-      match loopVar with Some {v = loopVarId} then
-        (loopVarId, _variable info loopVarId)
-      else
-        (nameNoSym "", uunit_)
-    with (loopVarId, tailExpr) in
-    let recCall = TmApp {
-      lhs = _variable info loopId, rhs = tailExpr, ty = _tyuk info, info = info
-    } in
-    let loopBody = bind_ initialDelay (compileRtpplStmts env recCall body) in
-    let recBind = {
-      ident = loopId, tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = TmLam {
-        ident = loopVarId, tyAnnot = _tyuk info, tyParam = _tyuk info,
-        body = loopBody, ty = _tyuk info, info = info },
-      info = info
-    } in
-    let resultBind = TmLet {
-      ident = loopVarId, tyAnnot = _tyuk info, tyBody = _tyuk info,
-      body = recCall, inexpr = uunit_, ty = _tyuk info, info = info
-    } in
-    TmRecLets {
-      bindings = [recBind], inexpr = resultBind, ty = _tyuk info, info = info }
-
 
   sem compileRtpplExpr : RtpplExpr -> Expr
   sem compileRtpplExpr =

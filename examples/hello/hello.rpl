@@ -19,11 +19,12 @@ template X(period : Int) {
   input in1 : Float
   output out1 : Float
   // Repeat code in the block with a periodic delay in-between
-  periodic period {
+  while true {
     read in1 to indata
     for x in f(indata) {
       write x to out1
     }
+    delay period
   }
 }
 

@@ -51,7 +51,7 @@ lang RtpplJson = RtpplAst + RtpplTaskData + RtpplConnectionData
       ("id", JsonString (nameGetStr id)),
       ("period", JsonInt period),
       ("importance", JsonFloat priority),
-      ("particles", JsonInt options.defaultParticles),
+      ("particles", JsonInt 0),
       ("budget", JsonInt 0),
       ("core", JsonInt 0)
     ] in
@@ -86,8 +86,7 @@ lang RtpplJson = RtpplAst + RtpplTaskData + RtpplConnectionData
   sem compileOptionsToJson =
   | opts ->
     let mapping = [
-      ("buffer-size", JsonInt opts.bufferSize),
-      ("default-particles", JsonInt opts.defaultParticles)
+      ("buffer-size", JsonInt opts.bufferSize)
     ] in
     JsonObject (mapFromSeq cmpString mapping)
 

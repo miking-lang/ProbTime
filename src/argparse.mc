@@ -6,7 +6,6 @@ type RtpplOptions = {
   debugCompileMExpr : Bool,
   outputPath : String,
   bufferSize : Int,
-  defaultParticles : Int,
   file : String
 }
 
@@ -16,7 +15,6 @@ let rtpplDefaultOptions = {
   debugCompileMExpr = false,
   outputPath = "",
   bufferSize = slli 1 22,
-  defaultParticles = 100,
   file = ""
 }
 
@@ -35,10 +33,7 @@ let optionsConfig = [
   , lam p. {p.options with outputPath = argToString p} ),
   ( [("--buffer-size", " ", "<n>")]
   , "Sets the size in bytes of the circular buffer used for all ports (default: 2^22)"
-  , lam p. {p.options with bufferSize = argToInt p} ),
-  ( [("--default-particles", " ", "<n>")]
-  , "Sets the default number of particles to use for infers prior to configuration (default: 100)"
-  , lam p. {p.options with defaultParticles = argToInt p} )
+  , lam p. {p.options with bufferSize = argToInt p} )
 ]
 
 let printHelpMsgAndExit = lam.
