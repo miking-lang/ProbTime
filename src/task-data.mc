@@ -141,7 +141,7 @@ lang RtpplTaskInfers = RtpplAst
   sem collectInfersWithoutParticlesHelper : (Int, Map Info Int) -> RtpplStmt
                                          -> (Int, Map Info Int)
   sem collectInfersWithoutParticlesHelper acc =
-  | InferRtpplStmt {p = Some _, info = info} ->
+  | InferRtpplStmt {p = None _, info = info} ->
     match acc with (nextIdx, env) in
     (addi nextIdx 1, mapInsert info nextIdx env)
   | stmt ->
