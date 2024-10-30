@@ -103,7 +103,7 @@ prod Assume : RtpplStmt = "sample" id:LName "~" d:RtpplExpr
 prod Infer : RtpplStmt = "infer" model:RtpplExpr "to" id:LName ("particles" p:RtpplExpr)?
 prod Degenerate : RtpplStmt = "degenerate"
 prod Resample : RtpplStmt = "resample"
-prod Read : RtpplStmt = "read" port:LIdent "to" (dst:LName ("." proj:LIdent)?)
+prod Read : RtpplStmt = "read" port:LIdent "to" dst:LName
 prod Write : RtpplStmt = "write" src:RtpplExpr "to" port:LIdent ("offset" delay:RtpplExpr)?
 prod Condition : RtpplStmt =
   "if" cond:RtpplExpr ("update" id:LName)? "{" thn:RtpplStmt* "}" "else" "{" els:RtpplStmt* "}"
@@ -159,7 +159,9 @@ prod Main : RtpplMain =
 prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
 prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
 
-prod Task : RtpplTask = "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")" "importance" p:Integer
+prod Task : RtpplTask =
+  "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")" "with"
+  "{" key:LIdent "=" value:Integer ("," key:LIdent "=" value:Integer)* "}"
 prod Connection : RtpplConnection = from:RtpplPortSpec "->" to:RtpplPortSpec
 prod PortSpec : RtpplPortSpec = port:LName ("." id:LIdent)?
 

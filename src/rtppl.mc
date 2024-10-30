@@ -5,12 +5,14 @@ include "connection-data.mc"
 include "pprint.mc"
 include "task-data.mc"
 include "validate.mc"
+include "lowered/compile.mc"
+include "lowered/pprint.mc"
 
-include "json.mc"
-include "mexpr/shallow-patterns.mc"
-include "mexpr/type-check.mc"
-include "ocaml/mcore.mc"
-include "tuning/hole-cfa.mc"
+include "stdlib::json.mc"
+include "stdlib::mexpr/shallow-patterns.mc"
+include "stdlib::mexpr/type-check.mc"
+include "stdlib::ocaml/mcore.mc"
+include "stdlib::tuning/hole-cfa.mc"
 
 include "coreppl::dppl-arg.mc"
 include "coreppl::infer-method.mc"
@@ -188,6 +190,12 @@ let program = parseRtpplExn options.file content in
 (if options.debugParse then
   printLn (pprintRtpplProgram program)
 else ());
+
+if options.debugLowered then
+  let program = use ProbTimeLower in lowerRtpplProgram program in
+  printLn (use ProbTimePrettyPrint in join [pprintPTProgram program])
+else
+
 validateRtpplProgram program;
 let result = compileRtpplProgram options program in
 (if options.debugCompileDppl then

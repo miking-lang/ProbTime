@@ -32,8 +32,8 @@ system {
   sensor src : Float rate 1s
   actuator dst : Float rate 200ms
 
-  task a = X(500ms) importance 1
-  task b = X(250ms) importance 1
+  task a = X(500ms) with {importance = 1, minDelay = 500ms, maxDelay = 500ms}
+  task b = X(250ms) with {importance = 1, minDelay = 250ms, maxDelay = 250ms}
 
   src -> a.in1
   a.out1 -> b.in1

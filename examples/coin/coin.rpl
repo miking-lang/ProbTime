@@ -80,7 +80,7 @@ template CoinFlip() {
 system {
   sensor coin : Float rate 300ms
   actuator bias : Float rate 100ms
-  task cf = CoinFlip() importance 1
+  task cf = CoinFlip() with {importance = 1, minDelay = 1s, maxDelay = 1s}
   coin -> cf.in1
   cf.out1 -> bias
 }

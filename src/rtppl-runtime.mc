@@ -68,6 +68,8 @@ let cpuExecutionTime : Ref Timespec = ref (0,0)
 
 let particleCount : Ref Int = ref 0
 let taskBudget : Ref Int = ref 0
+let minArrivalTime : Ref Int = ref 0
+let maxArrivalTime : Ref Int = ref 0
 let taskExecTimes : Ref [Int] = ref []
 
 let slowdown : Ref Int = ref 1
@@ -112,6 +114,13 @@ let writeCollectionMessage = lam.
   modref cpuExecutionTime cpu;
   modref taskExecTimes (snoc (deref taskExecTimes) execTime)
 
+let validateDelayBounds : Int -> () = lam delayNs.
+  if gti delayNs (deref maxArrivalTime) then
+    printLn (join ["Specified delay ", int2string delayNs, "ns is longer than declared maximum"])
+  else if lti delayNs (deref minArrivalTime) then
+    printLn (join ["Specified delay ", int2string delayNs, "ns is shorter than declared minimum"])
+  else ()
+
 -- NOTE(larshum, 2023-09-10): Performs a soft delay of the program. Before the
 -- delay takes place, we flush the output buffers by writing data to output
 -- ports. After the delay, we update the contents of the input sequences by
@@ -122,6 +131,7 @@ let sdelay =
   lam delayNs : Int.
   flushOutputs ();
   writeCollectionMessage ();
+  validateDelayBounds delayNs;
   let overrun = delayBy delayNs in
   updateInputs ();
   overrun
@@ -229,7 +239,9 @@ let readJsonConfig = lam configFile. lam taskId.
   let numParticles = getJsonIntExn jsonTask "particles" in
   let budget = getJsonIntExn jsonTask "budget" in
   let slowdown = getJsonIntExn (getJsonValueExn config "config") "slowdown" in
-  (numParticles, budget, slowdown)
+  let maxArrivalTime = getJsonIntExn jsonTask "max_delay" in
+  let minArrivalTime = getJsonIntExn jsonTask "min_delay" in
+  (numParticles, budget, slowdown, minArrivalTime, maxArrivalTime)
 
 let rtpplReadConfigurationFile = lam taskId.
   let configFile = "system.json" in
@@ -238,10 +250,13 @@ let rtpplReadConfigurationFile = lam taskId.
   else error (join ["Failed to read system configuration in '", configFile, "'"])
 
 let rtpplLoadConfiguration = lam taskId.
-  match rtpplReadConfigurationFile taskId with (nparticles, budget, slowd) in
+  match rtpplReadConfigurationFile taskId
+  with (nparticles, budget, slowd, minat, maxat) in
   modref particleCount nparticles;
   modref taskBudget budget;
-  modref slowdown slowd
+  modref slowdown slowd;
+  modref minArrivalTime minat;
+  modref maxArrivalTime maxat
 
 let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
   lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.

@@ -538,7 +538,7 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
       inexpr = uunit_, ty = _tyuk info, info = info }
   -- NOTE(larshum, 2023-04-17): We introduce an intermediate Expr node for
   -- reading and writing. These are eliminated when specializing to a task.
-  | ReadRtpplStmt {port = {v = portStr}, dst = {v = dst}, proj = proj, info = info} ->
+  | ReadRtpplStmt {port = {v = portStr}, dst = {v = dst}, info = info} ->
     let portId = _getPortIdentifier env.topId portStr in
     match mapLookup portId env.portTypes with Some ty then
       let readTy = TySeq {
@@ -546,16 +546,9 @@ lang RtpplDPPLCompile = RtpplCompileExprExtension + RtpplCompileType + RtpplTask
         info = info
       } in
       let readExpr = TmRead {portId = portStr, ty = _tyuk info, info = info} in
-      let body =
-        match proj with Some {v = label} then
-          TmRecordUpdate {
-            rec = _variable info dst, key = stringToSid label, value = readExpr,
-            ty = _tyuk info, info = info }
-        else readExpr
-      in
       TmLet {
         ident = dst, tyAnnot = readTy, tyBody = _tyuk info,
-        body = body, inexpr = uunit_, ty = _tyuk info, info = info }
+        body = readExpr, inexpr = uunit_, ty = _tyuk info, info = info }
     else
       errorSingle [info] "Reference to undefined port"
   | WriteRtpplStmt {src = src, port = {v = portStr}, delay = delay, info = info} ->
@@ -1318,7 +1311,12 @@ lang RtpplCompile =
                  -> RtpplTask -> CompileResult
   sem compileTask env connections tasks =
   | (TaskRtpplTask {id = {v = id}, templateId = {v = tid}, args = args,
-                    p = {v = taskPriority}, info = info}) & task ->
+                    key = key, value = value, info = info}) & task ->
+    let p =
+      match find (lam x. eqString (x.0).v "importance") (zip key value) with Some p then
+        (p.1).v
+      else error "Invalid specification of task"
+    in
     let args = map (resolveConstants env.consts) args in
     let runtimeIds = getRuntimeIds () in
     -- NOTE(larshum, 2023-05-30): This only works assuming the (escaped) name

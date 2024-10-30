@@ -71,7 +71,7 @@ lang RtpplPrettyPrint = RtpplAst
   sem pprintRtpplExt : RtpplExt -> String
   sem pprintRtpplExt =
   | SensorRtpplExt {id = {v = id}, ty = ty, r = r} ->
-    join ["  sensor ", nameGetStr id, " : ", pprintRtpplType ty, " maxrate ", pprintRtpplExpr 0 r]
+    join ["  sensor ", nameGetStr id, " : ", pprintRtpplType ty, " rate ", pprintRtpplExpr 0 r]
   | ActuatorRtpplExt {id = {v = id}, ty = ty} ->
     join ["  actuator ", nameGetStr id, " : ", pprintRtpplType ty]
 
@@ -130,15 +130,11 @@ lang RtpplPrettyPrint = RtpplAst
     join [pprintIndent indent, "degenerate"]
   | ResampleRtpplStmt _ ->
     join [pprintIndent indent, "resample"]
-  | ReadRtpplStmt {port = {v = portId}, dst = {v = dst}, proj = proj} ->
-    let projStr =
-      match proj with Some {v = projId} then concat "." projId
-      else ""
-    in
-    join [pprintIndent indent, "read ", portId, " to ", nameGetStr dst, projStr]
+  | ReadRtpplStmt {port = {v = portId}, dst = {v = dst}} ->
+    join [pprintIndent indent, "read ", portId, " to ", nameGetStr dst]
   | WriteRtpplStmt {src = src, port = {v = portId}, delay = delay} ->
     let delayStr =
-      match delay with Some d then concat "delay " (pprintRtpplExpr indent d)
+      match delay with Some d then concat "offset " (pprintRtpplExpr indent d)
       else ""
     in
     join [pprintIndent indent, "write ", pprintRtpplExpr indent src, " to ", portId, delayStr]
@@ -230,6 +226,9 @@ lang RtpplPrettyPrint = RtpplAst
   | UniformDistRtpplExpr {lo = lo, hi = hi} ->
     let ii = pprintIndentIncrement indent in
     join ["Uniform(", pprintRtpplExpr ii lo, ", ", pprintRtpplExpr ii hi, ")"]
+  | BernoulliDistRtpplExpr {p = p} ->
+    let ii = pprintIndentIncrement indent in
+    join ["Bernoulli(", pprintRtpplExpr ii p, ")"]
   | GammaDistRtpplExpr {k = k, theta = theta} ->
     let ii = pprintIndentIncrement indent in
     join ["Gamma(", pprintRtpplExpr ii k, ", ", pprintRtpplExpr ii theta, ")"]

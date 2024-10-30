@@ -90,7 +90,12 @@ lang RtpplTaskPriority = RtpplAst
 
   sem findTaskPriority : Map Name Float -> RtpplTask -> Map Name Float
   sem findTaskPriority priorities =
-  | TaskRtpplTask {id = {v = id}, p = {v = priority}} ->
+  | TaskRtpplTask {id = {v = id}, key = keys, value = values, info = info} ->
+    let priority =
+      match find (lam x. eqString (x.0).v "importance") (zip keys values) with Some p then
+        (p.1).v
+      else errorSingle [info] "Importance not specified for task"
+    in
     mapInsert id (int2float priority) priorities
 
   sem normalizedPriority : Float -> Float -> Float
