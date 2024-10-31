@@ -132,8 +132,10 @@ lang ProbTimeTypePrettyPrint = ProbTimePrettyPrintBase + ProbTimeTypeAst
     (env, join ["Dist(", ty, ")"])
   | PTTAlias {id = id, args = args} ->
     match pprintEnvGetStr env id with (env, id) in
-    match mapAccumL pprintPTType env args with (env, args) in
-    (env, join [id, "(", strJoin ", " args, ")"])
+    if null args then (env, id)
+    else
+      match mapAccumL pprintPTType env args with (env, args) in
+      (env, join [id, "(", strJoin ", " args, ")"])
 end
 
 lang ProbTimeStmtPrettyPrint =
@@ -179,10 +181,6 @@ lang ProbTimeStmtPrettyPrint =
       else (env, "")
     with (env, suffix) in
     (env, join ["write ", src, " to ", port, suffix])
-  | PTSPortDecl {id = id, ty = ty, output = output} ->
-    match pprintPTType env ty with (env, ty) in
-    let prefix = if output then "output" else "input" in
-    (env, join [prefix, " ", id, " : ", ty])
   | PTSDelay {ns = ns} ->
     match pprintPTExpr env ns with (env, ns) in
     (env, join ["delay ", ns])
@@ -266,12 +264,19 @@ lang ProbTimeTopPrettyPrint =
         match pprintPTType env ty with (env, ty) in
         (env, concat " : " ty)
     with (env, tyAnnotStr) in
+    match
+      match funKind with PTKTemplate {inputs = inputs, outputs = outputs} then
+        match mapAccumL pprintInputPort env inputs with (env, inputs) in
+        match mapAccumL pprintOutputPort env outputs with (env, outputs) in
+        (env, inputs, outputs)
+      else (env, [], [])
+    with (env, inputs, outputs) in
     let ii = pprintIncr 0 in
     match mapAccumL (pprintPTStmt ii) env body with (env, body) in
     let prefix = pprintFunKind funKind in
     (env, join [
       prefix, " ", id, "(", strJoin ", " params, ")", tyAnnotStr, " {\n",
-      strJoin "\n" body, "\n}"
+      strJoin "\n" (join [inputs, outputs, body]), "\n}"
     ])
 
   sem pprintFunKind : PTFunKind -> String
@@ -286,6 +291,21 @@ lang ProbTimeTopPrettyPrint =
     match pprintEnvGetStr env id with (env, id) in
     match pprintPTType env ty with (env, ty) in
     (env, join [id, " : ", ty])
+
+  sem pprintInputPort : PprintEnv -> PTPortDecl -> (PprintEnv, String)
+  sem pprintInputPort env =
+  | port -> pprintPortDecl "input" env port
+
+  sem pprintOutputPort : PprintEnv -> PTPortDecl -> (PprintEnv, String)
+  sem pprintOutputPort env =
+  | port -> pprintPortDecl "output" env port
+
+  sem pprintPortDecl : String -> PprintEnv -> PTPortDecl -> (PprintEnv, String)
+  sem pprintPortDecl prefix env =
+  | {label = label, ty = ty} ->
+    match pprintPTType env ty with (env, ty) in
+    let indent = pprintIncr 0 in
+    (env, join [pprintSpacing indent, prefix, " ", label, " : ", ty])
 end
 
 lang ProbTimeMainPrettyPrint =
@@ -300,36 +320,75 @@ lang ProbTimeMainPrettyPrint =
 
   sem pprintPTNode : PprintEnv -> PTNode -> (PprintEnv, String)
   sem pprintPTNode env =
-  | PTNSensor {id = id, ty = ty, rate = rate, outputs = outputs} ->
+  | PTNSensor {id = id, ty = ty, rate = rate, outputs = outputs, info = info} ->
+    let src = Sensor {id = id, info = info} in
+    let pprintSensorPortConnection = lam env. lam dst.
+      pprintPortConnection env src dst
+    in
     match pprintEnvGetStr env id with (env, id) in
     match pprintPTType env ty with (env, ty) in
     match pprintPTExpr env rate with (env, rate) in
+    match mapAccumL pprintSensorPortConnection env outputs with (env, outputs) in
+    let ii = pprintIncr 0 in
     (env, join [
-      "  sensor ", id, " : ", ty, " rate ", rate
+      "  sensor ", id, " : ", ty, " rate ", rate, "\n", strJoin "\n" outputs
     ])
-  | PTNActuator {id = id, ty = ty, rate = rate, inputs = inputs} ->
+  | PTNActuator {id = id, ty = ty, rate = rate, inputs = inputs, info = info} ->
+    let dst = Actuator {id = id, info = info} in
+    let pprintActuatorPortConnection = lam env. lam src.
+      pprintPortConnection env src dst
+    in
     match pprintEnvGetStr env id with (env, id) in
     match pprintPTType env ty with (env, ty) in
     match pprintPTExpr env rate with (env, rate) in
+    match mapAccumL pprintActuatorPortConnection env inputs with (env, inputs) in
+    let ii = pprintIncr 0 in
     (env, join [
-      "  actuator ", id, " : ", ty, " rate ", rate
+      "  actuator ", id, " : ", ty, " rate ", rate, "\n", strJoin "\n" inputs
     ])
   | PTNTask {id = id, template = template, args = args, inputs = inputs,
              outputs = outputs, importance = importance, minDelay = minDelay,
-             maxDelay = maxDelay} ->
-    match pprintEnvGetStr env id with (env, id) in
+             maxDelay = maxDelay, info = info} ->
+    match pprintEnvGetStr env id with (env, idStr) in
     match pprintEnvGetStr env template with (env, template) in
     match mapAccumL pprintPTExpr env args with (env, args) in
     let withStr = pprintWithArgs importance minDelay maxDelay in
-    let inputConnStr = lam i. lam label. join [i, " -> ", id, ".", label] in
-    match mapMapAccum (pprintConnection inputConnStr) env inputs with (env, inputs) in
-    let outputConnStr = lam o. lam label. join [id, ".", label, " -> ", o] in
-    match mapMapAccum (pprintConnection outputConnStr) env outputs with (env, outputs) in
+    match
+      mapMapAccum
+        (lam env. lam dstLabel. lam srcs.
+          let dst = Task {id = id, label = dstLabel, isOutput = false, info = info} in
+          mapAccumL (lam acc. lam src. pprintPortConnection env src dst) env srcs)
+        env inputs
+    with (env, inputs) in
+    match
+      mapMapAccum
+        (lam env. lam srcLabel. lam dsts.
+          let src = Task {id = id, label = srcLabel, isOutput = true, info = info} in
+          mapAccumL (lam env. lam dst. pprintPortConnection env src dst) env dsts)
+        env outputs
+    with (env, outputs) in
     (env, join [
-      "  task ", id, " = ", template, "(", strJoin ", " args, ") with ",
-      withStr, pprintNewline 2,
-      strJoin (pprintNewline 2) (concat (mapValues inputs) (mapValues outputs))
+      "  task ", idStr, " = ", template, "(", strJoin ", " args, ") with ",
+      withStr, "\n",
+      strJoin "\n"
+        (concat (join (mapValues inputs)) (join (mapValues outputs)))
     ])
+
+  sem pprintPortConnection : PprintEnv -> PTPort -> PTPort -> (PprintEnv, String)
+  sem pprintPortConnection env srcPort =
+  | dstPort ->
+    match pprintPTPort env srcPort with (env, src) in
+    match pprintPTPort env dstPort with (env, dst) in
+    let indent = pprintIncr 0 in
+    (env, join [pprintSpacing indent, src, " -> ", dst])
+
+  sem pprintPTPort : PprintEnv -> PTPort -> (PprintEnv, String)
+  sem pprintPTPort env =
+  | Sensor {id = id} -> pprintEnvGetStr env id
+  | Actuator {id = id} -> pprintEnvGetStr env id
+  | Task {id = id, label = label} ->
+    match pprintEnvGetStr env id with (env, id) in
+    (env, join [id, ".", label])
 
   sem pprintConnection : (String -> String -> String) -> PprintEnv -> String
                       -> Name -> (PprintEnv, String)

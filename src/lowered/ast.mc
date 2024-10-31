@@ -101,7 +101,6 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
   -- Real-time and communication statements
   | PTSRead {port : String, dst : Name, info : Info}
   | PTSWrite {src : PTExpr, port : String, delay : Option PTExpr, info : Info}
-  | PTSPortDecl {id : String, ty : PTType, output : Bool, info : Info}
   | PTSDelay {ns : PTExpr, info : Info}
   -- General statements
   | PTSBinding {id : Name, ty : Option PTType, e : PTExpr, info : Info}
@@ -121,7 +120,6 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
   | PTSResample t -> t.info
   | PTSRead t -> t.info
   | PTSWrite t -> t.info
-  | PTSPortDecl t -> t.info
   | PTSDelay t -> t.info
   | PTSBinding t -> t.info
   | PTSCondition t -> t.info
@@ -144,9 +142,11 @@ lang ProbTimeTopAst = ProbTimeStmtAst + ProbTimeTypeAst + ProbTimeExprAst
   type PTParam = { id : Name, ty : PTType, info : Info }
 
   syn PTFunKind =
-  | PTKProbModel ()
-  | PTKTemplate ()
   | PTKFunction ()
+  | PTKProbModel ()
+  | PTKTemplate {inputs : [PTPortDecl], outputs : [PTPortDecl]}
+
+  type PTPortDecl = {label : String, ty : PTType, info : Info}
 
   sem ptTopInfo : PTTop -> Info
   sem ptTopInfo =
@@ -158,12 +158,41 @@ end
 lang ProbTimeMainAst = ProbTimeStmtAst + ProbTimeTypeAst + ProbTimeExprAst
   type PTMain = [PTNode]
 
+  syn PTPort =
+  | Sensor {id : Name, info : Info}
+  | Actuator {id : Name, info : Info}
+  | Task {id : Name, label : String, isOutput : Bool, info : Info}
+
+  sem ptPortInfo : PTPort -> Info
+  sem ptPortInfo =
+  | Sensor t -> t.info
+  | Actuator t -> t.info
+  | Task t -> t.info
+
+  sem ptPortName : PTPort -> String
+  sem ptPortName =
+  | Sensor t -> nameGetStr t.id
+  | Actuator t -> nameGetStr t.id
+  | Task t -> join [nameGetStr t.id, ".", t.label]
+
+  sem isInputPort : PTPort -> Bool
+  sem isInputPort =
+  | Sensor _ -> false
+  | Actuator _ -> true
+  | Task t -> not t.isOutput
+
+  sem isOutputPort : PTPort -> Bool
+  sem isOutputPort =
+  | Sensor _ -> true
+  | Actuator _ -> false
+  | Task t -> t.isOutput
+
   syn PTNode =
-  | PTNSensor {id : Name, ty : PTType, rate : PTExpr, outputs : [Name], info : Info}
-  | PTNActuator {id : Name, ty : PTType, rate : PTExpr, inputs : [Name], info : Info}
+  | PTNSensor {id : Name, ty : PTType, rate : PTExpr, outputs : [PTPort], info : Info}
+  | PTNActuator {id : Name, ty : PTType, rate : PTExpr, inputs : [PTPort], info : Info}
   | PTNTask {
-      id : Name, template : Name, args : [PTExpr], inputs : Map String Name,
-      outputs : Map String Name, importance : Int, minDelay : Int,
+      id : Name, template : Name, args : [PTExpr], inputs : Map String [PTPort],
+      outputs : Map String [PTPort], importance : Int, minDelay : Int,
       maxDelay : Int, info : Info
     }
 
@@ -177,7 +206,7 @@ end
 lang ProbTimeAst = ProbTimeTopAst + ProbTimeMainAst
   type PTProgram = {
     tops : [PTTop],
-    system : [PTNode]
+    system : PTMain
   }
 end
 

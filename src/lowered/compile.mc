@@ -185,11 +185,15 @@ lang ProbTimeLowerTop =
       ty = lowerRtpplType t.ty, body = body, funKind = PTKProbModel (),
       info = t.info }
   | TemplateDefRtpplTop t ->
-    let body = concat (map lowerRtpplPort t.body.ports) (map lowerRtpplStmt t.body.body) in
+    match partition (lam p. match p with InputRtpplPort _ then true else false) t.body.ports
+    with (inputPorts, outputPorts) in
+    let inputs = map lowerRtpplPort inputPorts in
+    let outputs = map lowerRtpplPort outputPorts in
+    let body = map lowerRtpplStmt t.body.body in
     PTTFunDef {
       id = t.id.v, params = lowerRtpplParams t.params,
-      ty = PTTUnit {info = t.info}, body = body, funKind = PTKTemplate (),
-      info = t.info }
+      ty = PTTUnit {info = t.info}, body = body,
+      funKind = PTKTemplate {inputs = inputs, outputs = outputs}, info = t.info }
 
   sem lowerRtpplParams : RtpplTopParams -> [PTParam]
   sem lowerRtpplParams =
@@ -200,14 +204,12 @@ lang ProbTimeLowerTop =
     in
     map lowerRtpplParam params
 
-  sem lowerRtpplPort : RtpplPort -> PTStmt
+  sem lowerRtpplPort : RtpplPort -> PTPortDecl
   sem lowerRtpplPort =
   | InputRtpplPort t ->
-    PTSPortDecl {
-      id = t.id.v, ty = lowerRtpplType t.ty, output = false, info = t.info }
+    {label = t.id.v, ty = lowerRtpplType t.ty, info = t.info}
   | OutputRtpplPort t ->
-    PTSPortDecl {
-      id = t.id.v, ty = lowerRtpplType t.ty, output = true, info = t.info }
+    {label = t.id.v, ty = lowerRtpplType t.ty, info = t.info}
 
   sem constructLoweredBody : [RtpplStmt] -> Option RtpplExpr -> [PTStmt]
   sem constructLoweredBody stmts =
@@ -219,29 +221,31 @@ lang ProbTimeLowerTop =
     map lowerRtpplStmt stmts
 end
 
-lang ProbTimeConnectionGraph
-  type ConnectionLabel = (Option String, Option String)
+lang ProbTimeConnectionGraph = ProbTimeMainAst
+  type Connection = (PTPort, PTPort)
 
-  sem eqConnectionLabel : ConnectionLabel -> ConnectionLabel -> Bool
-  sem eqConnectionLabel lhs =
-  | rhs -> eqi (cmpConnectionLabel lhs rhs) 0
+  sem eqConnection : Connection -> Connection -> Bool
+  sem eqConnection lhs =
+  | rhs -> eqi (cmpConnection lhs rhs) 0
 
-  sem cmpConnectionLabel : ConnectionLabel -> ConnectionLabel -> Int
-  sem cmpConnectionLabel lhs =
-  | rhs -> tupleCmp2 cmpLabel cmpLabel lhs rhs
+  sem cmpConnection : Connection -> Connection -> Int
+  sem cmpConnection lhs =
+  | rhs -> tupleCmp2 cmpPort cmpPort lhs rhs
 
-  sem cmpLabel : Option String -> Option String -> Int
-  sem cmpLabel lhs =
-  | rhs -> cmpLabelH (lhs, rhs)
+  sem cmpPort : PTPort -> PTPort -> Int
+  sem cmpPort lhs =
+  | rhs -> cmpPortH (lhs, rhs)
 
-  sem cmpLabelH : (Option String, Option String) -> Int
-  sem cmpLabelH =
-  | (None _, None _) -> 0
-  | (Some _, None _) -> 1
-  | (None _, Some _) -> -1
-  | (Some l, Some r) -> cmpString l r
+  sem cmpPortH : (PTPort, PTPort) -> Int
+  sem cmpPortH =
+  | (Sensor l, Sensor r) -> nameCmp l.id r.id
+  | (Actuator l, Actuator r) -> nameCmp l.id r.id
+  | (Task l, Task r) ->
+    let c = nameCmp l.id r.id in
+    if eqi c 0 then cmpString l.label r.label
+    else c
 
-  type ConnectionGraph = Digraph Name ConnectionLabel
+  type ConnectionGraph = Digraph Name Connection
 end
 
 lang ProbTimeLowerMain =
@@ -257,7 +261,7 @@ lang ProbTimeLowerMain =
                           -> ConnectionGraph
   sem constructSystemGraph exts tasks =
   | connections ->
-    let graph = digraphEmpty nameCmp eqConnectionLabel in
+    let graph = digraphEmpty nameCmp eqConnection in
     let vertexNames = concat (map extName exts) (map taskName tasks) in
     let graph = digraphAddVertices vertexNames graph in
     foldl addConnectionEdge graph connections
@@ -274,25 +278,45 @@ lang ProbTimeLowerMain =
   sem addConnectionEdge : ConnectionGraph -> RtpplConnection -> ConnectionGraph
   sem addConnectionEdge g =
   | ConnectionRtpplConnection {from = from, to = to} ->
-    match from with PortSpecRtpplPortSpec {port = {v = srcId}, id = fromPortLabel} in
-    match to with PortSpecRtpplPortSpec {port = {v = dstId}, id = toPortLabel} in
-    let fromLabel = optionMap (lam x. x.v) fromPortLabel in
-    let toLabel = optionMap (lam x. x.v) toPortLabel in
-    digraphAddEdge srcId dstId (fromLabel, toLabel) g
+    match from with PortSpecRtpplPortSpec {port = {v = srcId}, id = fromPortLabel, info = i1} in
+    match to with PortSpecRtpplPortSpec {port = {v = dstId}, id = toPortLabel, info = i2} in
+    let from =
+      match fromPortLabel with Some label then
+        Task {id = srcId, label = label.v, isOutput = true, info = i1}
+      else Sensor {id = srcId, info = i1}
+    in
+    let to =
+      match toPortLabel with Some label then
+        Task {id = dstId, label = label.v, isOutput = false, info = i2}
+      else Actuator {id = dstId, info = i2}
+    in
+    digraphAddEdge srcId dstId (from, to) g
 
   sem extToNode : ConnectionGraph -> RtpplExt -> PTNode
   sem extToNode g =
   | SensorRtpplExt t ->
     let id = t.id.v in
     let ty = lowerRtpplType t.ty in
-    let outputs = digraphSuccessors id g in
+    let outputs =
+      map
+        (lam edge.
+          match edge with (_, _, (_, dstLabel)) in
+          dstLabel)
+        (digraphEdgesFrom id g)
+    in
     PTNSensor {
       id = id, ty = ty, rate = lowerRtpplExpr t.r, outputs = outputs,
       info = t.info }
   | ActuatorRtpplExt t ->
     let id = t.id.v in
     let ty = lowerRtpplType t.ty in
-    let inputs = digraphPredeccessors id g in
+    let inputs =
+      map
+        (lam edge.
+          match edge with (_, _, (srcLabel, _)) in
+          srcLabel)
+        (digraphEdgesTo id g)
+    in
     PTNActuator {
       id = id, ty = ty, rate = lowerRtpplExpr t.r, inputs = inputs,
       info = t.info }
@@ -302,20 +326,20 @@ lang ProbTimeLowerMain =
   | TaskRtpplTask t ->
     let id = t.id.v in
     let outputs =
-      mapFromSeq cmpString
-        (map
-          (lam edge.
-            match edge with (_, dst, (Some label, _)) in
-            (label, dst))
-          (digraphEdgesFrom id g))
+      foldl
+        (lam acc. lam edge.
+          match edge with (_, _, (Task {label = srcLabel}, dstLabel)) in
+          mapInsertWith concat srcLabel [dstLabel] acc)
+        (mapEmpty cmpString)
+        (digraphEdgesFrom id g)
     in
     let inputs =
-      mapFromSeq cmpString
-        (map
-          (lam edge.
-            match edge with (src, _, (_, Some label)) in
-            (label, src))
-          (digraphEdgesTo id g))
+      foldl
+        (lam acc. lam edge.
+          match edge with (_, _, (srcLabel, Task {label = dstLabel})) in
+          mapInsertWith concat dstLabel [srcLabel] acc)
+        (mapEmpty cmpString)
+        (digraphEdgesTo id g)
     in
     let args = map lowerRtpplExpr t.args in
     match extractRequiredTaskKeyValuePairs t.info (zip t.key t.value)

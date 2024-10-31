@@ -193,7 +193,8 @@ else ());
 
 if options.debugLowered then
   let program = use ProbTimeLower in lowerRtpplProgram program in
-  printLn (use ProbTimePrettyPrint in join [pprintPTProgram program])
+  printLn (use ProbTimePrettyPrint in join [pprintPTProgram program]);
+  use ProbTimeValidateSystem in validateProbTimeProgram program
 else
 
 validateRtpplProgram program;
