@@ -3,8 +3,9 @@
 
 include "../ast.mc"
 include "ast.mc"
-include "stdlib::digraph.mc"
-include "stdlib::tuple.mc"
+
+include "digraph.mc"
+include "tuple.mc"
 
 lang ProbTimeLowerBase = RtpplAst
 end
@@ -173,16 +174,19 @@ lang ProbTimeLowerTop =
   | TypeAliasRtpplTop t ->
     PTTTypeAlias { id = t.id.v, ty = lowerRtpplType t.ty, info = t.info }
   | FunctionDefRtpplTop t ->
-    let body = constructLoweredBody t.body.stmts t.body.ret in
+    let body = map lowerRtpplStmt t.body.stmts in
+    let return = optionMap lowerRtpplExpr t.body.ret in
     PTTFunDef {
       id = t.id.v, params = lowerRtpplParams t.params,
-      ty = lowerRtpplType t.ty, body = body, funKind = PTKFunction (),
-      info = t.info }
+      ty = lowerRtpplType t.ty, body = body, return = return,
+      funKind = PTKFunction (), info = t.info }
   | ModelDefRtpplTop t ->
-    let body = constructLoweredBody t.body.stmts t.body.ret in
+    let body = map lowerRtpplStmt t.body.stmts in
+    let return = optionMap lowerRtpplExpr t.body.ret in
     PTTFunDef {
       id = t.id.v, params = lowerRtpplParams t.params,
-      ty = lowerRtpplType t.ty, body = body, funKind = PTKProbModel (),
+      ty = lowerRtpplType t.ty, body = body, return = return,
+      funKind = PTKProbModel (),
       info = t.info }
   | TemplateDefRtpplTop t ->
     match partition (lam p. match p with InputRtpplPort _ then true else false) t.body.ports
@@ -192,7 +196,7 @@ lang ProbTimeLowerTop =
     let body = map lowerRtpplStmt t.body.body in
     PTTFunDef {
       id = t.id.v, params = lowerRtpplParams t.params,
-      ty = PTTUnit {info = t.info}, body = body,
+      ty = PTTUnit {info = t.info}, body = body, return = None (),
       funKind = PTKTemplate {inputs = inputs, outputs = outputs}, info = t.info }
 
   sem lowerRtpplParams : RtpplTopParams -> [PTParam]
@@ -210,15 +214,6 @@ lang ProbTimeLowerTop =
     {label = t.id.v, ty = lowerRtpplType t.ty, info = t.info}
   | OutputRtpplPort t ->
     {label = t.id.v, ty = lowerRtpplType t.ty, info = t.info}
-
-  sem constructLoweredBody : [RtpplStmt] -> Option RtpplExpr -> [PTStmt]
-  sem constructLoweredBody stmts =
-  | Some e ->
-    let stmts = map lowerRtpplStmt stmts in
-    let e = lowerRtpplExpr e in
-    snoc stmts (PTSReturn {e = e, info = ptExprInfo e})
-  | None _ ->
-    map lowerRtpplStmt stmts
 end
 
 lang ProbTimeConnectionGraph = ProbTimeMainAst

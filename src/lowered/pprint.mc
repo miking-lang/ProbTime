@@ -1,5 +1,5 @@
 include "ast.mc"
-include "stdlib::mexpr/pprint.mc"
+include "mexpr/pprint.mc"
 
 lang ProbTimePrettyPrintBase = IdentifierPrettyPrint
 end
@@ -199,10 +199,14 @@ lang ProbTimeStmtPrettyPrint =
     match pprintUpdateString env upd with (env, upd) in
     let ii = pprintIncr indent in
     match mapAccumL (pprintPTStmt ii) env thn with (env, thn) in
-    match mapAccumL (pprintPTStmt ii) env els with (env, els) in
-    (env, join [
-      "if ", cond, upd, " {\n", strJoin "\n" thn, pprintNewline indent,
-      "} else {\n", strJoin "\n" els, pprintNewline indent, "}" ])
+    if null els then
+      (env, join [
+        "if ", cond, upd, " {\n", strJoin "\n" thn, pprintNewline indent, "}"])
+    else
+      match mapAccumL (pprintPTStmt ii) env els with (env, els) in
+      (env, join [
+        "if ", cond, upd, " {\n", strJoin "\n" thn, pprintNewline indent,
+        "} else {\n", strJoin "\n" els, pprintNewline indent, "}" ])
   | PTSForLoop {id = id, e = e, upd = upd, body = body} ->
     match pprintEnvGetStr env id with (env, id) in
     match pprintPTExpr env e with (env, e) in
@@ -228,9 +232,6 @@ lang ProbTimeStmtPrettyPrint =
     match pprintEnvGetStr env id with (env, id) in
     match mapAccumL pprintPTExpr env args with (env, args) in
     (env, join [id, "(", strJoin ", " args, ")"])
-  | PTSReturn {e = e} ->
-    match pprintPTExpr env e with (env, e) in
-    (env, join ["return ", e])
 
   sem pprintUpdateString : PprintEnv -> Option Name -> (PprintEnv, String)
   sem pprintUpdateString env =
@@ -255,7 +256,8 @@ lang ProbTimeTopPrettyPrint =
     match pprintEnvGetStr env id with (env, id) in
     match pprintPTType env ty with (env, ty) in
     (env, join ["type ", id, " = ", ty])
-  | PTTFunDef {id = id, params = params, ty = ty, body = body, funKind = funKind} ->
+  | PTTFunDef {id = id, params = params, ty = ty, body = body, return = return,
+               funKind = funKind} ->
     match pprintEnvGetStr env id with (env, id) in
     match mapAccumL pprintParam env params with (env, params) in
     match
@@ -273,6 +275,13 @@ lang ProbTimeTopPrettyPrint =
     with (env, inputs, outputs) in
     let ii = pprintIncr 0 in
     match mapAccumL (pprintPTStmt ii) env body with (env, body) in
+    match
+      match return with Some e then
+        match pprintPTExpr env e with (env, e) in
+        let ret = join [pprintSpacing ii, "return ", e] in
+        (env, snoc body ret)
+      else (env, body)
+    with (env, body) in
     let prefix = pprintFunKind funKind in
     (env, join [
       prefix, " ", id, "(", strJoin ", " params, ")", tyAnnotStr, " {\n",

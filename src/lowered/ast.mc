@@ -109,7 +109,6 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
   | PTSWhileLoop {cond : PTExpr, upd : Option Name, body : [PTStmt], info : Info}
   | PTSAssign {target : PTExpr, e : PTExpr, info : Info}
   | PTSFunctionCall {id : Name, args : [PTExpr], info : Info}
-  | PTSReturn {e : PTExpr, info : Info}
 
   sem ptStmtInfo : PTStmt -> Info
   sem ptStmtInfo =
@@ -127,7 +126,6 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
   | PTSWhileLoop t -> t.info
   | PTSAssign t -> t.info
   | PTSFunctionCall t -> t.info
-  | PTSReturn t -> t.info
 end
 
 lang ProbTimeTopAst = ProbTimeStmtAst + ProbTimeTypeAst + ProbTimeExprAst
@@ -136,7 +134,7 @@ lang ProbTimeTopAst = ProbTimeStmtAst + ProbTimeTypeAst + ProbTimeExprAst
   | PTTTypeAlias {id : Name, ty : PTType, info : Info}
   | PTTFunDef {
       id : Name, params : [PTParam], ty : PTType, body : [PTStmt],
-      funKind : PTFunKind, info : Info
+      return : Option PTExpr, funKind : PTFunKind, info : Info
     }
 
   type PTParam = { id : Name, ty : PTType, info : Info }

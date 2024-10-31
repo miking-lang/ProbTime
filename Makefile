@@ -5,7 +5,8 @@ BIN_PATH=$(HOME)/.local/bin
 SRC_PATH=$(HOME)/.local/src/rtppl
 RTPPL_SRC=src/argparse.mc src/ast.mc src/compile.mc src/pprint.mc \
 	src/src-loc.mc src/task-data.mc src/validate.mc src/rtppl.mc \
-	src/lowered/ast.mc src/lowered/compile.mc src/lowered/pprint.mc
+	src/lowered/ast.mc src/lowered/compile.mc src/lowered/pprint.mc \
+	src/lowered/codegen.mc src/lowered/runtime.mc
 RTPPL_CONFIG_SRC= src/configuration/argparse.mc src/configuration/configure.mc\
 	src/configuration/definitions.mc src/configuration/json-parse.mc\
 	src/configuration/main.mc src/configuration/schedulable.mc

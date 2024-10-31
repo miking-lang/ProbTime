@@ -5,6 +5,8 @@ include "connection-data.mc"
 include "pprint.mc"
 include "task-data.mc"
 include "validate.mc"
+include "lowered/ast.mc"
+include "lowered/codegen.mc"
 include "lowered/compile.mc"
 include "lowered/pprint.mc"
 
@@ -194,7 +196,9 @@ else ());
 if options.debugLowered then
   let program = use ProbTimeLower in lowerRtpplProgram program in
   printLn (use ProbTimePrettyPrint in join [pprintPTProgram program]);
-  use ProbTimeValidateSystem in validateProbTimeProgram program
+  use ProbTimeValidateSystem in validateProbTimeProgram program;
+  let ast = use ProbTimeCodegen in compileProbTimeProgram options program in
+  printLn (use ProbTimeCodegen in expr2str ast)
 else
 
 validateRtpplProgram program;
