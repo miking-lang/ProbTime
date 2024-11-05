@@ -25,7 +25,7 @@ let optionsConfig = [
   , "Prints the AST after parsing"
   , lam p. {p.options with debugParse = true} ),
   ( [("--debug-lowered", "", "")]
-  , "Prints the lowered version of the AST and then exits"
+  , "Prints the AST after lowering the parse AST"
   , lam p. {p.options with debugLowered = true} ),
   ( [("--debug-compile-dppl", "", "")]
   , "Prints the AST of each task after compiling to Miking DPPL"

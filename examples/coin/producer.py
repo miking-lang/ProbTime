@@ -29,9 +29,9 @@ signal.signal(signal.SIGINT, sigint_handler)
 
 with open("system.json", "r") as f:
     data = json.load(f)
-    buffer_size = data["compileopts"]["buffer-size"]
+    buffer_size = data["compileopts"]["bufferSize"]
 
-with mmio.probtime_open("cf-in1", buffer_size) as f:
+with mmio.probtime_open("cf.in1", buffer_size) as f:
     while True:
         ts = time.time_ns()
         payload = biased_coin()

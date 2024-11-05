@@ -59,8 +59,8 @@ let readJsonConfig = lam configFile. lam taskId.
   let numParticles = getJsonIntExn jsonTask "particles" in
   let budget = getJsonIntExn jsonTask "budget" in
   let slowdown = getJsonIntExn (getJsonValueExn config "config") "slowdown" in
-  let maxArrivalTime = getJsonIntExn jsonTask "max_delay" in
-  let minArrivalTime = getJsonIntExn jsonTask "min_delay" in
+  let maxArrivalTime = getJsonIntExn jsonTask "maxrate" in
+  let minArrivalTime = getJsonIntExn jsonTask "minrate" in
   (numParticles, budget, slowdown, minArrivalTime, maxArrivalTime)
 
 let rtpplReadConfigurationFile = lam taskId.
@@ -90,28 +90,6 @@ let storeCollectedResults = lam taskId.
   in
   let data = map int2string (snoc execTimes overran) in
   writeFile collectionFile (strJoin "\n" data)
-
-let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
-  lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.
-
-  -- Sets up a signal handler on SIGINT which calls code for closing all file
-  -- descriptors before terminating.
-  setSigintHandler (lam. closeFileDescriptors (); storeCollectedResults taskId; exit 0);
-
-  rtpplLoadConfiguration taskId;
-
-  -- Initialize the logical time to the current time of the physical clock
-  modref monoLogicalTime (getMonotonicTime ());
-  modref wallLogicalTime (getWallClockTime ());
-  modref cpuExecutionTime (getProcessCpuTime ());
-
-  -- Updates the contents of the input sequences.
-  updateInputSequences ();
-
-  -- Hand over control to the task
-  cont ();
-
-  ()
 
 -- Functions related to timestamping of messages of arbitrary types.
 type TSV a = (Timespec, a)
@@ -230,6 +208,28 @@ let rtpplWriteDistFloats =
 let rtpplWriteDistFloatRecords =
   lam fd. lam nfields. lam msgs.
   iter (lam msg. rtpplWriteDistFloatRecord fd nfields msg) msgs
+
+let rtpplRuntimeInit : all a. (() -> ()) -> (() -> ()) -> String -> (() -> a) -> () =
+  lam updateInputSequences. lam closeFileDescriptors. lam taskId. lam cont.
+
+  -- Sets up a signal handler on SIGINT which calls code for closing all file
+  -- descriptors before terminating.
+  setSigintHandler (lam. closeFileDescriptors (); storeCollectedResults taskId; exit 0);
+
+  rtpplLoadConfiguration taskId;
+
+  -- Initialize the logical time to the current time of the physical clock
+  modref monoLogicalTime (getMonotonicTime ());
+  modref wallLogicalTime (getWallClockTime ());
+  modref cpuExecutionTime (getProcessCpuTime ());
+
+  -- Updates the contents of the input sequences.
+  updateInputSequences ();
+
+  -- Hand over control to the task
+  cont ();
+
+  ()
 
 -- NOTE(larshum, 2023-04-14): The below functions are intentionally exposed to
 -- the DSL code for convenience.

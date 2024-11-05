@@ -1,56 +1,18 @@
 -- Generates Miking DPPL code from the ProbTime AST.
 
 include "ast.mc"
+include "codegen-base.mc"
 include "runtime.mc"
+include "symbolize.mc"
 
 include "mexpr/ast.mc"
 include "mexpr/ast-builder.mc"
 include "mexpr/duplicate-code-elimination.mc"
+include "mexpr/extract.mc"
 include "mexpr/lamlift.mc"
 include "mexpr/type-check.mc"
+
 include "coreppl::parser.mc"
-
-lang ProbTimeCodegenBase = MExprAst
-  -- TODO: What to store in this environment?
-  type Env = ()
-
-  -- TODO: What to return?
-  type CompileResult = Expr
-
-  -- Recursively set the info field of all subexpressions of a given expression
-  -- to the provided info value, while avoiding to overwrite existing info
-  -- fields. This function also recurses down into type fields and patterns.
-  sem withInfoRec : Info -> Expr -> Expr
-  sem withInfoRec info =
-  | e ->
-    let e =
-      match infoTm e with NoInfo _ then withInfo info e
-      else e
-    in
-    let e = smap_Expr_Pat (withInfoRecPat info) e in
-    let e = smap_Expr_Type (withInfoRecTy info) e in
-    smap_Expr_Expr (withInfoRec info) e
-
-  sem withInfoRecTy : Info -> Type -> Type
-  sem withInfoRecTy info =
-  | ty ->
-    let ty =
-      match infoTy ty with NoInfo _ then tyWithInfo info ty
-      else ty
-    in
-    smap_Type_Type (withInfoRecTy info) ty
-
-  sem withInfoRecPat : Info -> Pat -> Pat
-  sem withInfoRecPat info =
-  | p ->
-    let p =
-      match infoPat p with NoInfo _ then withInfoPat info p
-      else p
-    in
-    let p = smap_Pat_Expr (withInfoRec info) p in
-    let p = smap_Pat_Type (withInfoRecTy info) p in
-    smap_Pat_Pat (withInfoRecPat info) p
-end
 
 -- NOTE(larshum, 2024-10-31): Extension of the expressions defined in MExpr
 -- with intermediate expressions. We use this in the initial codegen to be able
@@ -63,31 +25,26 @@ lang ProbTimeCodegenExprExtension =
   | TmRead {label : String, ty : Type, info : Info}
   | TmWrite {label : String, src : Expr, delay : Expr, ty : Type, info : Info}
   | TmSdelay {e : Expr, ty : Type, info : Info}
-  | TmConfigurableInfer {model : Name, ty : Type, info : Info}
 
   sem infoTm =
   | TmRead t -> t.info
   | TmWrite t -> t.info
   | TmSdelay t -> t.info
-  | TmConfigurableInfer t -> t.info
 
   sem tyTm =
   | TmRead t -> t.ty
   | TmWrite t -> t.ty
   | TmSdelay t -> t.ty
-  | TmConfigurableInfer t -> t.ty
 
   sem withInfo info =
   | TmRead t -> TmRead {t with info = info}
   | TmWrite t -> TmWrite {t with info = info}
   | TmSdelay t -> TmSdelay {t with info = info}
-  | TmConfigurableInfer t -> TmConfigurableInfer {t with info = info}
 
   sem withType ty =
   | TmRead t -> TmRead {t with ty = ty}
   | TmWrite t -> TmWrite {t with ty = ty}
   | TmSdelay t -> TmSdelay {t with ty = ty}
-  | TmConfigurableInfer t -> TmConfigurableInfer {t with ty = ty}
 
   sem smapAccumL_Expr_Expr f acc =
   | TmRead t -> (acc, TmRead t)
@@ -98,7 +55,6 @@ lang ProbTimeCodegenExprExtension =
   | TmSdelay t ->
     match f acc t.e with (acc, e) in
     (acc, TmSdelay {t with e = e})
-  | TmConfigurableInfer t -> (acc, TmConfigurableInfer t)
 
   sem symbolizeExpr env =
   | TmRead t ->
@@ -110,7 +66,6 @@ lang ProbTimeCodegenExprExtension =
   | TmSdelay t ->
     TmSdelay {t with e = symbolizeExpr env t.e,
                      ty = symbolizeType env t.ty}
-  | TmConfigurableInfer t -> TmConfigurableInfer t
 
   sem typeCheckExpr env =
   | TmRead t ->
@@ -133,15 +88,11 @@ lang ProbTimeCodegenExprExtension =
     unify env [t.info] tyint_ (tyTm e);
     unify env [t.info] tyunit_ tyRes;
     TmSdelay {t with e = e, ty = tyRes}
-  | TmConfigurableInfer t ->
-    let tyRes = newvar env.currentLvl t.info in
-    TmConfigurableInfer {t with ty = TyDist {ty = tyRes, info = t.info}}
 
   sem isAtomic =
   | TmRead _ -> true
   | TmWrite _ -> true
   | TmSdelay _ -> true
-  | TmConfigurableInfer _ -> true
 
   sem pprintCode indent env =
   | TmRead t ->
@@ -153,9 +104,6 @@ lang ProbTimeCodegenExprExtension =
   | TmSdelay t ->
     match pprintCode indent env t.e with (env, e) in
     (env, join ["sdelay ", e])
-  | TmConfigurableInfer t ->
-    match pprintEnvGetStr env t.model with (env, model) in
-    (env, join ["inferRunner ", model])
 end
 
 lang ProbTimeCodegenBinOp = ProbTimeCodegenBase + ProbTimeBinOpAst
@@ -294,16 +242,16 @@ end
 
 lang ProbTimeCodegenStmt =
   ProbTimeCodegenExprExtension + ProbTimeCodegenType + ProbTimeCodegenExpr +
-  ProbTimeStmtAst
+  ProbTimeStmtAst + ProbTimeRuntime
 
-  sem compileProbTimeStmts : Env -> Expr -> [PTStmt] -> Expr
+  sem compileProbTimeStmts : PTCompileEnv -> Expr -> [PTStmt] -> Expr
   sem compileProbTimeStmts env inexpr =
   | [stmt] ++ tl ->
     bind_ (compileProbTimeStmt env stmt) (compileProbTimeStmts env inexpr tl)
   | [] ->
     inexpr
 
-  sem compileProbTimeStmt : Env -> PTStmt -> Expr
+  sem compileProbTimeStmt : PTCompileEnv -> PTStmt -> Expr
   sem compileProbTimeStmt env =
   | PTSObserve {e = e, dist = dist, info = info} ->
     let obsExpr = TmObserve {
@@ -321,7 +269,7 @@ lang ProbTimeCodegenStmt =
     let inferModelId = nameNoSym "inferModel" in
     let inferExpr = TmInfer {
       method = BPF {particles = nvar_ p},
-      model = nulam_ (nameNoSym "") (compileProbTimeExpr model),
+      model = ulam_ "" (compileProbTimeExpr model),
       ty = ityunknown_ info, info = info
     } in
     let inferModelBind = nulet_ inferModelId (nulam_ p inferExpr) in
@@ -331,12 +279,12 @@ lang ProbTimeCodegenStmt =
         let p = compileProbTimeExpr p in
         nlet_ id distTy (app_ (nvar_ inferModelId) p)
       else
-        -- NOTE(larshum, 2024-10-31): We use this term to defer the interaction
-        -- with runtime functions until a later stage in the compilation.
-        let configurableInfer = TmConfigurableInfer {
-          model = inferModelId, ty = distTy, info = info
-        } in
-        nlet_ id distTy configurableInfer
+        -- NOTE(larshum, 2024-11-05): Use the runner defined in the runtime to
+        -- run the inference. This runner determines the number of particles to
+        -- use based on a configuration file, which allows us to adjust it
+        -- after compilation (e.g., by the automatic configuration).
+        let inferRunnerId = lookupRuntimeId "probTimeInferRunner" in
+        nlet_ id distTy (app_ (nvar_ inferRunnerId) (nvar_ inferModelId))
     in
     withInfoRec info (bindall_ [inferModelBind, distBind])
   | PTSDegenerate {info = info} ->
@@ -353,11 +301,13 @@ lang ProbTimeCodegenStmt =
       ty = ityunknown_ info, info = info
     } in
     withInfoRec info (nulet_ (nameNoSym "") resampleExpr)
-  | PTSRead {port = port, dst = dst, info = info} ->
+  | PTSRead {port = port, dst = dst, ty = ty, info = info} ->
     let readExpr = TmRead {
       label = port, ty = ityunknown_ info, info = info
     } in
-    withInfoRec info (nulet_ dst readExpr)
+    let ty = compileProbTimeType ty in
+    let readTy = tyseq_ (tytuple_ [tytuple_ [tyint_, tyint_], ty]) in
+    withInfoRec info (nlet_ dst readTy readExpr)
   | PTSWrite {src = src, port = port, delay = delay, info = info} ->
     let delay =
       match delay with Some d then compileProbTimeExpr d
@@ -380,37 +330,33 @@ lang ProbTimeCodegenStmt =
     in
     withInfoRec info (nlet_ id ty (compileProbTimeExpr e))
   | PTSCondition {cond = cond, upd = upd, thn = thn, els = els, info = info} ->
-    match
-      match upd with Some id then (id, nvar_ id)
-      else (nameNoSym "", unit_)
-    with (targetId, tailExpr) in
+    match getUpdParams upd with (preExpr, tailExprs, bodyId, postId) in
     let cond = compileProbTimeExpr cond in
-    let thn = compileProbTimeStmts env tailExpr thn in
-    let els = compileProbTimeStmts env tailExpr els in
-    let condExpr = if_ cond thn els in
-    withInfoRec info (nulet_ targetId condExpr)
+    match
+      match tailExprs with [thnTail, elsTail] then
+        ( compileProbTimeStmts env thnTail thn
+        , compileProbTimeStmts env elsTail els )
+      else match tailExprs with [tailExpr] in
+        ( compileProbTimeStmts env tailExpr thn
+        , compileProbTimeStmts env tailExpr els )
+    with (thn, els) in
+    let condExpr = app_ (nulam_ bodyId (if_ cond thn els)) preExpr in
+    withInfoRec info (nulet_ postId condExpr)
   | PTSForLoop {id = id, e = e, upd = upd, body = body, info = info} ->
-    match
-      match upd with Some updId then (updId, nvar_ updId)
-      else (nameNoSym "", unit_)
-    with (loopVarId, tailExpr) in
+    match getUpdParams upd with (preExpr, [tailExpr], bodyId, postId) in
     let body = compileProbTimeStmts env tailExpr body in
-    let funExpr = nulam_ loopVarId (nulam_ id body) in
+    let funExpr = nulam_ bodyId (nulam_ id body) in
     let e = compileProbTimeExpr e in
-    withInfoRec info (nulet_ loopVarId (foldl_ funExpr tailExpr e))
+    withInfoRec info (nulet_ postId (foldl_ funExpr preExpr e))
   | PTSWhileLoop {cond = cond, upd = upd, body = body, info = info} ->
-    match
-      match upd with Some updId then (updId, nvar_ updId)
-      else (nameNoSym "", unit_)
-    with (loopVarId, tailExpr) in
-    let loopId = nameSym "loopFn" in
-    let recursiveCall = app_ (nvar_ loopId) tailExpr in
+    match getUpdParams upd with (preExpr, [tailExpr], bodyId, postId) in
+    let loopId = nameSym "while" in
     let cond = compileProbTimeExpr cond in
-    let body = compileProbTimeStmts env recursiveCall body in
+    let body = compileProbTimeStmts env (app_ (nvar_ loopId) tailExpr) body in
     let loopBody = if_ cond body tailExpr in
-    let resultBinding = nulet_ loopVarId recursiveCall in
+    let resultBinding = nulet_ postId (app_ (nvar_ loopId) preExpr) in
     withInfoRec info
-      (bind_ (nureclets_ [(loopId, nulam_ loopVarId body)]) resultBinding)
+      (bind_ (nureclets_ [(loopId, nulam_ bodyId body)]) resultBinding)
   | PTSAssign {target = target, e = e, info = info} ->
     let e = compileProbTimeExpr e in
     match
@@ -424,20 +370,39 @@ lang ProbTimeCodegenStmt =
   | PTSFunctionCall {id = id, args = args, info = info} ->
     let args = if null args then [unit_] else map compileProbTimeExpr args in
     withInfoRec info (appSeq_ (nvar_ id) args)
+
+  -- NOTE(larshum, 2024-11-05): Produce the expressions and names required to
+  -- represent the various components of the update term:
+  --  1. A variable representing the value prior to the construct.
+  --  2. Variables representing the final result for each separate body of the
+  --     construct.
+  --  3. The name used for the corresponding parameter, in the body of the
+  --     construct.
+  --  4. The name used for storing the result and which we refer to in code
+  --     after the construct.
+  sem getUpdParams : UpdateEntry -> (Expr, [Expr], Name, Name)
+  sem getUpdParams =
+  | Some {preId = preId, bodyParamId = bodyParamId,
+          bodyResultIds = bodyResultIds, postId = postId} ->
+    (nvar_ preId, map nvar_ bodyResultIds, bodyParamId, postId)
+  | None _ ->
+    let id = nameNoSym "" in
+    (uunit_, [uunit_], id, id)
 end
 
 lang ProbTimeCodegenTop =
   ProbTimeTopAst + ProbTimeCodegenStmt + ProbTimeCodegenType +
   ProbTimeCodegenExpr
 
-  sem compileProbTimeTop : Env -> PTTop -> (Env, Expr)
+  sem compileProbTimeTop : PTCompileEnv -> PTTop -> (PTCompileEnv, Expr)
   sem compileProbTimeTop env =
   | PTTConstant {id = id, ty = ty, e = e, info = info} ->
+    let env = {env with consts = mapInsert id (resolveConstants env.consts e) env.consts} in
     let ty = compileProbTimeType ty in
     let e = compileProbTimeExpr e in
     (env, withInfoRec info (nlet_ id ty e))
   | PTTTypeAlias {id = id, ty = ty, info = info} ->
-    -- let env = {env with aliases = mapInsert id ty env.aliases} in
+    let env = {env with aliases = mapInsert id ty env.aliases} in
     let ty = compileProbTimeType ty in
     (env, withInfoRec info (ntype_ id [] ty))
   | PTTFunDef {id = id, params = params, ty = ty, body = body,
@@ -449,13 +414,11 @@ lang ProbTimeCodegenTop =
       match return with Some e then compileProbTimeExpr e
       else unit_
     in
-    -- TODO: Handle template definitions in a slightly different way, by
-    --   1. Escaping the template name to avoid shadowing - this can happen
-    --      when the name of a template is the same as a function defined in
-    --      the runtime.
-    --   2. Ensure the task template has at most one use of infer.
-    --   3. Passing along the template name in the environment so that this is
-    --      known when compiling expressions.
+    let env =
+      match funKind with PTKTemplate t then
+        {env with templates = mapInsert id t env.templates}
+      else env
+    in
     let body = compileProbTimeStmts env return body in
     let addParamToBody = lam acc. lam p.
       match p with (paramId, paramTy, info) in
@@ -476,37 +439,140 @@ lang ProbTimeCodegenTop =
   sem compileParam =
   | {id = id, ty = ty, info = info} ->
     (id, compileProbTimeType ty, info)
+
+  sem resolveConstants : Map Name PTExpr -> PTExpr -> PTExpr
+  sem resolveConstants consts =
+  | var & PTEVar {id = id} ->
+    match mapLookup id consts with Some e then e else var
+  | e -> smapPTExprPTExpr (resolveConstants consts) e
 end
 
-lang ProbTimeCodegenSystem = ProbTimeCodegenBase
-  sem compileSystem : Env -> PTMain -> CompileResult
+lang ProbTimeCodegenSystem =
+  ProbTimeCodegenExpr + ProbTimeCodegenTop + ProbTimeMainAst +
+  ProbTimeRuntime + ProbTimeGenerateRuntime + MExprExtract
+
+  sem compileSystem : PTCompileEnv -> PTMain -> Map Name Expr
   sem compileSystem env =
-  | _ -> error "compileSystem not implemented yet"
+  | nodes ->
+    foldl (compileTask env) (mapEmpty nameCmp) nodes
+
+  sem compileTask : PTCompileEnv -> CompileResult -> PTNode -> CompileResult
+  sem compileTask env acc =
+  | (PTNTask {id = id, template = template, args = args, inputs = inputs,
+              outputs = outputs, importance = importance, info = info}) & task ->
+    let args = map (resolveConstants env.consts) args in
+    let liftedArgsTask = getCapturedTopLevelVars info env template in
+    let args = join [
+      liftedArgsTask,
+      if null args then [var_ ""] else map compileProbTimeExpr args
+    ] in
+    let taskRun = appSeq_ (nvar_ template) args in
+    let runtimeInitId = lookupRuntimeId "rtpplRuntimeInit" in
+    let liftedArgsInit = getCapturedTopLevelVars info env runtimeInitId in
+    let initArgs =
+      concat
+        liftedArgsInit
+        [ nvar_ updateInputsId
+        , nvar_ closeFileDescriptorsId
+        , str_ (nameGetStr id)
+        , ulam_ "" taskRun ]
+    in
+    let tailExpr = appSeq_ (nvar_ (lookupRuntimeId "rtpplRuntimeInit")) initArgs in
+    let runtimeAst = generateTaskSpecificRuntime env task in
+    let ast = insertBindingsAt (nameEq runtimeInitId) runtimeAst env.ast in
+    let ast = specializeProbTimeExprs env ast in
+    let ast = extractAst (identifiersInExpr (setEmpty nameCmp) tailExpr) ast in
+    let ast = symbolize ast in
+    mapInsert id (bind_ ast tailExpr) acc
+  | _ -> acc
+
+  sem identifiersInExpr : Set Name -> Expr -> Set Name
+  sem identifiersInExpr acc =
+  | TmVar {ident = ident} -> setInsert ident acc
+  | t -> sfold_Expr_Expr identifiersInExpr acc t
+
+  sem insertBindingsAt : (Name -> Bool) -> Expr -> Expr -> Expr
+  sem insertBindingsAt shouldInsertAt binds =
+  | TmLet t ->
+    if shouldInsertAt t.ident then
+      TmLet {t with inexpr = bind_ binds t.inexpr}
+    else
+      TmLet {t with inexpr = insertBindingsAt shouldInsertAt binds t.inexpr}
+  | t -> smap_Expr_Expr (insertBindingsAt shouldInsertAt binds) t
+
+  sem getCapturedTopLevelVars : Info -> PTCompileEnv -> Name -> [Expr]
+  sem getCapturedTopLevelVars info env =
+  | id ->
+    match mapLookup id env.llSolutions with Some argMap then
+      let argIds = mapKeys argMap.vars in
+      map
+        (lam id.
+          let s = nameGetStr id in
+          match mapLookup s env.topVarEnv with Some topLevelId then
+            nvar_ topLevelId
+          else
+            errorSingle [info]
+              (concat "Could not find top-level binding of parameter " (nameGetStr id)))
+        argIds
+    else
+      errorSingle [info]
+        (concat "Could not find lambda lifted arguments for task " (nameGetStr id))
+
+  sem specializeProbTimeExprs : PTCompileEnv -> Expr -> Expr
+  sem specializeProbTimeExprs env =
+  | TmRead t ->
+    let target = deref_ (nvar_ inputSeqsId) in
+    withInfoRec t.info (unsafeCoerce_ (recordproj_ t.label target))
+  | TmWrite t ->
+    let tsv =
+      let tsvId = lookupRuntimeId "tsv" in
+      let capturedArgs = getCapturedTopLevelVars t.info env tsvId in
+      let args = join [capturedArgs, [t.delay, t.src]] in
+      appSeq_ (nvar_ tsvId) args
+    in
+    let outputsExpr = deref_ (nvar_ outputSeqsId) in
+    let outId = nameNoSym "out" in
+    let recUpdExpr =
+      recordupdate_ (nvar_ outId) t.label
+        (cons_ tsv (recordproj_ t.label (nvar_ outId)))
+    in
+    withInfoRec t.info
+      (bind_ (nulet_ outId outputsExpr) (modref_ (nvar_ outputSeqsId) recUpdExpr))
+  | TmSdelay t ->
+    let sdelayId = lookupRuntimeId "sdelay" in
+    let liftedArgs = getCapturedTopLevelVars t.info env sdelayId in
+    let sdelay = appSeq_ (nvar_ sdelayId) liftedArgs in
+    withInfoRec t.info
+      (appf3_ sdelay (nvar_ flushOutputsId) (nvar_ updateInputsId) t.e)
+  | t -> smap_Expr_Expr (specializeProbTimeExprs env) t
 end
 
 lang ProbTimeCodegen =
   ProbTimeCodegenTop + ProbTimeCodegenSystem + ProbTimeAst + ProbTimeRuntime +
-  MExprLambdaLift + MExprTypeCheck + MExprEliminateDuplicateCode + MExprSym
+  MExprLambdaLift + MExprTypeCheck + MExprEliminateDuplicateCode + ProbTimeSym + MExprSym
 
   sem compileProbTimeProgram : RtpplOptions -> PTProgram -> CompileResult
   sem compileProbTimeProgram options =
-  | {tops = tops, system = system} ->
-    match compileProbTimeToExpr options tops with (llSolutions, topEnv, expr) in
-    expr
-    --compileSystem env system
-
-  sem compileProbTimeToExpr : RtpplOptions -> [PTTop]
-                           -> (Map Name LambdaLiftSolution, Env, Expr)
-  sem compileProbTimeToExpr options =
-  | tops ->
-    match mapAccumL compileProbTimeTop () tops
-    with (topEnv, exprs) in
-    let probTimeExpr = bindall_ exprs in
+  | program ->
     let runtime = loadProbTimeRuntime () in
     let runtimeSymEnv = addTopNames symEnvEmpty runtime in
-    let probTimeExpr = symbolizeExpr runtimeSymEnv probTimeExpr in
-    let ast = eliminateDuplicateCode (bind_ runtime probTimeExpr) in
+    let program = symbolizeProbTime runtimeSymEnv program in
+    let env = compileProbTimeToExpr options runtime program.tops in
+    compileSystem env program.system
+
+  sem compileProbTimeToExpr : RtpplOptions -> Expr -> [PTTop] -> PTCompileEnv
+  sem compileProbTimeToExpr options runtime =
+  | tops ->
+    let emptyEnv = emptyPTCompileEnv options in
+    match mapAccumL compileProbTimeTop emptyEnv tops
+    with (env, exprs) in
+    let mainAst = bindall_ exprs in
+    let ast = bind_ runtime mainAst in
+    let ast = symbolizeExpr symEnvEmpty ast in
+    let ast = eliminateDuplicateCode ast in
     let ast = typeCheck ast in
     match liftLambdasWithSolutions ast with (solutions, ast) in
-    (solutions, topEnv, ast)
+    {env with llSolutions = solutions,
+              topVarEnv = (addTopNames symEnvEmpty ast).currentEnv.varEnv,
+              ast = ast}
 end

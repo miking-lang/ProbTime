@@ -233,9 +233,9 @@ lang ProbTimeStmtPrettyPrint =
     match mapAccumL pprintPTExpr env args with (env, args) in
     (env, join [id, "(", strJoin ", " args, ")"])
 
-  sem pprintUpdateString : PprintEnv -> Option Name -> (PprintEnv, String)
+  sem pprintUpdateString : PprintEnv -> UpdateEntry -> (PprintEnv, String)
   sem pprintUpdateString env =
-  | Some id ->
+  | Some {preId = id} ->
     match pprintEnvGetStr env id with (env, id) in
     (env, join [" update ", id])
   | None _ -> (env, "")
@@ -330,7 +330,7 @@ lang ProbTimeMainPrettyPrint =
   sem pprintPTNode : PprintEnv -> PTNode -> (PprintEnv, String)
   sem pprintPTNode env =
   | PTNSensor {id = id, ty = ty, rate = rate, outputs = outputs, info = info} ->
-    let src = Sensor {id = id, info = info} in
+    let src = Sensor {id = id, ty = ty, info = info} in
     let pprintSensorPortConnection = lam env. lam dst.
       pprintPortConnection env src dst
     in
@@ -343,7 +343,7 @@ lang ProbTimeMainPrettyPrint =
       "  sensor ", id, " : ", ty, " rate ", rate, "\n", strJoin "\n" outputs
     ])
   | PTNActuator {id = id, ty = ty, rate = rate, inputs = inputs, info = info} ->
-    let dst = Actuator {id = id, info = info} in
+    let dst = Actuator {id = id, ty = ty, info = info} in
     let pprintActuatorPortConnection = lam env. lam src.
       pprintPortConnection env src dst
     in
@@ -365,14 +365,20 @@ lang ProbTimeMainPrettyPrint =
     match
       mapMapAccum
         (lam env. lam dstLabel. lam srcs.
-          let dst = Task {id = id, label = dstLabel, isOutput = false, info = info} in
+          let ty = ptPortType (head srcs) in
+          let dst = Task {
+            id = id, label = dstLabel, isOutput = false, ty = ty, info = info
+          } in
           mapAccumL (lam acc. lam src. pprintPortConnection env src dst) env srcs)
         env inputs
     with (env, inputs) in
     match
       mapMapAccum
         (lam env. lam srcLabel. lam dsts.
-          let src = Task {id = id, label = srcLabel, isOutput = true, info = info} in
+          let ty = ptPortType (head dsts) in
+          let src = Task {
+            id = id, label = srcLabel, isOutput = true, ty = ty, info = info
+          } in
           mapAccumL (lam env. lam dst. pprintPortConnection env src dst) env dsts)
         env outputs
     with (env, outputs) in

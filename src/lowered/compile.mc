@@ -109,8 +109,8 @@ end
 lang ProbTimeLowerStmt =
   ProbTimeLowerExpr + ProbTimeLowerType + ProbTimeStmtAst
 
-  sem lowerRtpplStmt : RtpplStmt -> PTStmt
-  sem lowerRtpplStmt =
+  sem lowerRtpplStmt : Map String PTType -> RtpplStmt -> PTStmt
+  sem lowerRtpplStmt inputPortTypes =
   | ObserveRtpplStmt t ->
     PTSObserve {e = lowerRtpplExpr t.e, dist = lowerRtpplExpr t.d, info = t.info}
   | AssumeRtpplStmt t ->
@@ -121,7 +121,11 @@ lang ProbTimeLowerStmt =
   | DegenerateRtpplStmt t -> PTSDegenerate {info = t.info}
   | ResampleRtpplStmt t -> PTSResample {info = t.info}
   | ReadRtpplStmt t ->
-    PTSRead {port = t.port.v, dst = t.dst.v, info = t.info}
+    let port = t.port.v in
+    match mapLookup port inputPortTypes with Some ty then
+      PTSRead {port = port, dst = t.dst.v, ty = ty, info = t.info}
+    else
+      errorSingle [t.info] (concat "Read refers to unknown input port " port)
   | WriteRtpplStmt t ->
     PTSWrite {
       src = lowerRtpplExpr t.src, port = t.port.v,
@@ -134,18 +138,19 @@ lang ProbTimeLowerStmt =
   | ConditionRtpplStmt t ->
     let updVar = getUpdateVarIdentifier t.id in
     PTSCondition {
-      cond = lowerRtpplExpr t.cond, upd = updVar, thn = map lowerRtpplStmt t.thn,
-      els = map lowerRtpplStmt t.els, info = t.info }
+      cond = lowerRtpplExpr t.cond, upd = updVar,
+      thn = map (lowerRtpplStmt inputPortTypes) t.thn,
+      els = map (lowerRtpplStmt inputPortTypes) t.els, info = t.info }
   | ForLoopRtpplStmt t ->
     let updVar = getUpdateVarIdentifier t.upd in
     PTSForLoop {
       id = t.id.v, e = lowerRtpplExpr t.e, upd = updVar,
-      body = map lowerRtpplStmt t.body, info = t.info }
+      body = map (lowerRtpplStmt inputPortTypes) t.body, info = t.info }
   | WhileLoopRtpplStmt t ->
     let updVar = getUpdateVarIdentifier t.upd in
     PTSWhileLoop {
       cond = lowerRtpplExpr t.cond, upd = updVar,
-      body = map lowerRtpplStmt t.body, info = t.info }
+      body = map (lowerRtpplStmt inputPortTypes) t.body, info = t.info }
   | IdentPlusStmtRtpplStmt (t & {next = ReassignRtpplStmtNoIdent {proj = None _, e = e}}) ->
     let target = PTEVar {id = t.id.v, info = t.id.i} in
     PTSAssign {target = target, e = lowerRtpplExpr e, info = t.info}
@@ -157,9 +162,10 @@ lang ProbTimeLowerStmt =
   | IdentPlusStmtRtpplStmt (t & {next = FunctionCallSRtpplStmtNoIdent {args = args}}) ->
     PTSFunctionCall {id = t.id.v, args = map lowerRtpplExpr args, info = t.info}
 
-  sem getUpdateVarIdentifier : Option {v : Name, i : Info} -> Option Name
+  sem getUpdateVarIdentifier : Option {v : Name, i : Info} -> UpdateEntry
   sem getUpdateVarIdentifier =
-  | Some {v = id} -> Some id
+  | Some {v = id} ->
+    Some {preId = id, bodyParamId = id, bodyResultIds = [], postId = id}
   | None _ -> None ()
 end
 
@@ -174,14 +180,14 @@ lang ProbTimeLowerTop =
   | TypeAliasRtpplTop t ->
     PTTTypeAlias { id = t.id.v, ty = lowerRtpplType t.ty, info = t.info }
   | FunctionDefRtpplTop t ->
-    let body = map lowerRtpplStmt t.body.stmts in
+    let body = map (lowerRtpplStmt (mapEmpty cmpString)) t.body.stmts in
     let return = optionMap lowerRtpplExpr t.body.ret in
     PTTFunDef {
       id = t.id.v, params = lowerRtpplParams t.params,
       ty = lowerRtpplType t.ty, body = body, return = return,
       funKind = PTKFunction (), info = t.info }
   | ModelDefRtpplTop t ->
-    let body = map lowerRtpplStmt t.body.stmts in
+    let body = map (lowerRtpplStmt (mapEmpty cmpString)) t.body.stmts in
     let return = optionMap lowerRtpplExpr t.body.ret in
     PTTFunDef {
       id = t.id.v, params = lowerRtpplParams t.params,
@@ -193,7 +199,8 @@ lang ProbTimeLowerTop =
     with (inputPorts, outputPorts) in
     let inputs = map lowerRtpplPort inputPorts in
     let outputs = map lowerRtpplPort outputPorts in
-    let body = map lowerRtpplStmt t.body.body in
+    let inputTypes = mapFromSeq cmpString (map (lam i. (i.label, i.ty)) inputs) in
+    let body = map (lowerRtpplStmt inputTypes) t.body.body in
     PTTFunDef {
       id = t.id.v, params = lowerRtpplParams t.params,
       ty = PTTUnit {info = t.info}, body = body, return = None (),
@@ -246,20 +253,64 @@ end
 lang ProbTimeLowerMain =
   ProbTimeLowerStmt + ProbTimeLowerType + ProbTimeMainAst + ProbTimeConnectionGraph
 
-  sem lowerRtpplMain : RtpplMain -> [PTNode]
-  sem lowerRtpplMain =
-  | MainRtpplMain {ext = ext, tasks = tasks, connections = connections} ->
-    let graph = constructSystemGraph ext tasks connections in
-    join [map (extToNode graph) ext, map (taskToNode graph) tasks]
+  type PortTypeEnv = {
+    taskPorts : Map Name (Map String PTType),
+    extPorts : Map Name PTType
+  }
 
-  sem constructSystemGraph : [RtpplExt] -> [RtpplTask] -> [RtpplConnection]
-                          -> ConnectionGraph
-  sem constructSystemGraph exts tasks =
+  sem lowerRtpplMain : [RtpplTop] -> RtpplMain -> [PTNode]
+  sem lowerRtpplMain tops =
+  | MainRtpplMain {ext = ext, tasks = tasks, connections = connections} ->
+    -- NOTE(larshum, 2024-11-05): Collect the ports of all templates, so that
+    -- we can find a mapping from port label to its type. We do this here so
+    -- that we can encode this information directly in the lowered AST.
+    let templatePorts = foldl findTemplatePorts (mapEmpty nameCmp) tops in
+    let env = {
+      taskPorts = foldl (addTaskPorts templatePorts) (mapEmpty nameCmp) tasks,
+      extPorts = mapFromSeq nameCmp (map extNameToType ext)
+    } in
+    let graph = constructSystemGraph env ext tasks connections in
+    join [map (extToNode graph) ext, map (taskToNode env graph) tasks]
+
+  sem extNameToType : RtpplExt -> (Name, PTType)
+  sem extNameToType =
+  | SensorRtpplExt t -> (t.id.v, lowerRtpplType t.ty)
+  | ActuatorRtpplExt t -> (t.id.v, lowerRtpplType t.ty)
+
+  sem findTemplatePorts : Map Name (Map String PTType) -> RtpplTop
+                       -> Map Name (Map String PTType)
+  sem findTemplatePorts templatePorts =
+  | TemplateDefRtpplTop {id = {v = id}, body = {ports = ports}} ->
+    let toPortEntry = lam p.
+      match p with InputRtpplPort {id = {v = id}, ty = ty} then
+        (id, lowerRtpplType ty)
+      else match p with OutputRtpplPort {id = {v = id}, ty = ty} then
+        (id, lowerRtpplType ty)
+      else never
+    in
+    let v = mapFromSeq cmpString (map toPortEntry ports) in
+    mapInsert id v templatePorts
+  | _ -> templatePorts
+
+  sem addTaskPorts : Map Name (Map String PTType) -> Map Name (Map String PTType)
+                  -> RtpplTask -> Map Name (Map String PTType)
+  sem addTaskPorts templateMap taskMap =
+  | TaskRtpplTask {id = {v = id}, templateId = {v = templateId}, info = info} ->
+    match mapLookup templateId templateMap with Some templatePorts then
+      mapInsert id templatePorts taskMap
+    else
+      errorSingle [info]
+        (join ["Task ", nameGetStr id, " refers to unknown template ",
+               nameGetStr templateId])
+
+  sem constructSystemGraph : PortTypeEnv -> [RtpplExt] -> [RtpplTask]
+                          -> [RtpplConnection] -> ConnectionGraph
+  sem constructSystemGraph portTypeEnv exts tasks =
   | connections ->
     let graph = digraphEmpty nameCmp eqConnection in
     let vertexNames = concat (map extName exts) (map taskName tasks) in
     let graph = digraphAddVertices vertexNames graph in
-    foldl addConnectionEdge graph connections
+    foldl (addConnectionEdge portTypeEnv) graph connections
 
   sem extName : RtpplExt -> Name
   sem extName =
@@ -270,22 +321,46 @@ lang ProbTimeLowerMain =
   sem taskName =
   | TaskRtpplTask t -> t.id.v
 
-  sem addConnectionEdge : ConnectionGraph -> RtpplConnection -> ConnectionGraph
-  sem addConnectionEdge g =
+  sem addConnectionEdge : PortTypeEnv -> ConnectionGraph -> RtpplConnection
+                       -> ConnectionGraph
+  sem addConnectionEdge portTypeEnv g =
   | ConnectionRtpplConnection {from = from, to = to} ->
     match from with PortSpecRtpplPortSpec {port = {v = srcId}, id = fromPortLabel, info = i1} in
     match to with PortSpecRtpplPortSpec {port = {v = dstId}, id = toPortLabel, info = i2} in
     let from =
       match fromPortLabel with Some label then
-        Task {id = srcId, label = label.v, isOutput = true, info = i1}
-      else Sensor {id = srcId, info = i1}
+        let ty = findTaskPortType portTypeEnv i1 srcId label.v in
+        Task {id = srcId, label = label.v, isOutput = true, ty = ty, info = i1}
+      else
+        let ty = findExtPortType portTypeEnv i1 srcId in
+        Sensor {id = srcId, ty = ty, info = i1}
     in
     let to =
       match toPortLabel with Some label then
-        Task {id = dstId, label = label.v, isOutput = false, info = i2}
-      else Actuator {id = dstId, info = i2}
+        let ty = findTaskPortType portTypeEnv i2 dstId label.v in
+        Task {id = dstId, label = label.v, isOutput = false, ty = ty, info = i2}
+      else
+        let ty = findExtPortType portTypeEnv i2 dstId in
+        Actuator {id = dstId, ty = ty, info = i2}
     in
     digraphAddEdge srcId dstId (from, to) g
+
+  sem findTaskPortType : PortTypeEnv -> Info -> Name -> String -> PTType
+  sem findTaskPortType env info id =
+  | label ->
+    match mapLookup id env.taskPorts with Some ports then
+      match mapLookup label ports with Some ty then
+        ty
+      else
+        errorSingle [info] (join ["Unknown label ", label, " of task ", nameGetStr id])
+    else
+      errorSingle [info] (join ["Unknown label ", label, " of task ", nameGetStr id])
+
+  sem findExtPortType : PortTypeEnv -> Info -> Name -> PTType
+  sem findExtPortType env info =
+  | id ->
+    match mapLookup id env.extPorts with Some ty then ty
+    else errorSingle [info] (join ["Unknown external port ", nameGetStr id])
 
   sem extToNode : ConnectionGraph -> RtpplExt -> PTNode
   sem extToNode g =
@@ -316,8 +391,8 @@ lang ProbTimeLowerMain =
       id = id, ty = ty, rate = lowerRtpplExpr t.r, inputs = inputs,
       info = t.info }
 
-  sem taskToNode : ConnectionGraph -> RtpplTask -> PTNode
-  sem taskToNode g =
+  sem taskToNode : PortTypeEnv -> ConnectionGraph -> RtpplTask -> PTNode
+  sem taskToNode env g =
   | TaskRtpplTask t ->
     let id = t.id.v in
     let outputs =
@@ -375,5 +450,5 @@ lang ProbTimeLower = ProbTimeAst + ProbTimeLowerMain + ProbTimeLowerTop
   sem lowerRtpplProgram : RtpplProgram -> PTProgram
   sem lowerRtpplProgram =
   | ProgramRtpplProgram p ->
-    {tops = map lowerRtpplTop p.tops, system = lowerRtpplMain p.main}
+    {tops = map lowerRtpplTop p.tops, system = lowerRtpplMain p.tops p.main}
 end

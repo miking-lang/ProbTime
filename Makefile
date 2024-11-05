@@ -3,13 +3,9 @@ RTPPL_CONFIG_NAME=rtppl-configure
 SUPPORT_LIB_PATH=rtppl-support
 BIN_PATH=$(HOME)/.local/bin
 SRC_PATH=$(HOME)/.local/src/rtppl
-RTPPL_SRC=src/argparse.mc src/ast.mc src/compile.mc src/pprint.mc \
-	src/src-loc.mc src/task-data.mc src/validate.mc src/rtppl.mc \
-	src/lowered/ast.mc src/lowered/compile.mc src/lowered/pprint.mc \
-	src/lowered/codegen.mc src/lowered/runtime.mc
-RTPPL_CONFIG_SRC= src/configuration/argparse.mc src/configuration/configure.mc\
-	src/configuration/definitions.mc src/configuration/json-parse.mc\
-	src/configuration/main.mc src/configuration/schedulable.mc
+RTPPL_SRC=src/argparse.mc src/ast.mc src/pprint.mc src/rtppl.mc src/src-loc.mc\
+	$(wildcard src/lowered/*.mc)
+RTPPL_CONFIG_SRC=$(wildcard src/configuration/*.mc)
 
 default: build build/$(RTPPL_NAME) build/$(RTPPL_CONFIG_NAME)
 
