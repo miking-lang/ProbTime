@@ -1,6 +1,6 @@
 include "argparse.mc"
-include "ast.mc"
-include "pprint.mc"
+include "parse/ast.mc"
+include "parse/pprint.mc"
 include "lowered/ast.mc"
 include "lowered/codegen.mc"
 include "lowered/compile.mc"

@@ -50,7 +50,7 @@ lang ProbTimeJson = ProbTimeAst + ProbTimeCodegenBase
   | PTNSensor t ->
     let sensorEntry = JsonArray [makeExternalJsonObject t.id t.rate] in
     let json = mapInsertWith concatJsonArray "sensors" sensorEntry json in
-    
+
     -- Add information about all outgoing connections from this sensor.
     let src = Sensor {id = t.id, ty = t.ty, info = t.info} in
     let connections = JsonArray (map (makeConnectionJsonObject aliases src) t.outputs) in
