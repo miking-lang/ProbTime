@@ -1,7 +1,7 @@
 -- Lowering of the parse AST to a specialized AST designed to be significantly
 -- easier to work with than the automatically generated AST from the parser.
 
-include "../ast.mc"
+include "../parse/ast.mc"
 include "ast.mc"
 
 include "digraph.mc"

@@ -3,8 +3,8 @@ RTPPL_CONFIG_NAME=rtppl-configure
 SUPPORT_LIB_PATH=rtppl-support
 BIN_PATH=$(HOME)/.local/bin
 SRC_PATH=$(HOME)/.local/src/rtppl
-RTPPL_SRC=src/argparse.mc src/ast.mc src/pprint.mc src/rtppl.mc src/src-loc.mc\
-	$(wildcard src/lowered/*.mc)
+RTPPL_SRC=src/argparse.mc src/parse/ast.mc src/parse/pprint.mc src/rtppl.mc\
+	src/src-loc.mc $(wildcard src/lowered/*.mc)
 RTPPL_CONFIG_SRC=$(wildcard src/configuration/*.mc)
 
 default: build build/$(RTPPL_NAME) build/$(RTPPL_CONFIG_NAME)
@@ -18,7 +18,7 @@ build/$(RTPPL_CONFIG_NAME): $(RTPPL_CONFIG_SRC)
 build/$(RTPPL_NAME): $(RTPPL_SRC)
 	mi compile src/$(RTPPL_NAME).mc --output build/$(RTPPL_NAME)
 
-src/ast.mc: src/ast.syn src/lexer.mc
+src/parse/ast.mc: src/parse/ast.syn src/parse/lexer.mc
 	mi syn $< $@
 
 install: default
