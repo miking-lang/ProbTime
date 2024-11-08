@@ -1,13 +1,21 @@
 include "../argparse.mc"
 include "ast.mc"
 include "codegen-base.mc"
+include "task.mc"
 
 include "stdlib::json.mc"
 
 -- Generates a JSON specification given the arguments passed to the compiler
 -- and the lowered ProbTime AST. This specification allow us to adjust
 -- properties of the system after compilation.
-lang ProbTimeJson = ProbTimeAst + ProbTimeCodegenBase
+lang ProbTimeJson =
+  ProbTimeAst + ProbTimeCodegenBase + ProbTimeTaskConfigurableInfer
+
+  type JsonSpecEnv = {
+    aliases : Map Name PTType,
+    configurableTasks : Set Name
+  }
+
   sem generateJsonSpecification : RtpplOptions -> PTProgram -> ()
   sem generateJsonSpecification options =
   | program ->
@@ -18,8 +26,11 @@ lang ProbTimeJson = ProbTimeAst + ProbTimeCodegenBase
   sem makeJsonSystemSpecification : RtpplOptions -> PTProgram -> JsonValue
   sem makeJsonSystemSpecification options =
   | program ->
-    let aliases = foldl addTypeAliasMapping (mapEmpty nameCmp) program.tops in
-    let json = foldl (addNodeSpec aliases) (mapEmpty cmpString) program.system in
+    let env = {
+      aliases = foldl addTypeAliasMapping (mapEmpty nameCmp) program.tops,
+      configurableTasks = findTasksWithConfigurableInfer program
+    } in
+    let json = foldl (addNodeSpec env) (mapEmpty cmpString) program.system in
 
     -- NOTE(larshum, 2024-11-05): Exposes important compile-time parameters
     -- that were used to compile the ProbTime system.
@@ -44,16 +55,16 @@ lang ProbTimeJson = ProbTimeAst + ProbTimeCodegenBase
   | PTTTypeAlias t -> mapInsert t.id (resolveTypeAlias aliases t.ty) aliases
   | _ -> aliases
 
-  sem addNodeSpec : Map Name PTType -> Map String JsonValue -> PTNode
+  sem addNodeSpec : JsonSpecEnv -> Map String JsonValue -> PTNode
                  -> Map String JsonValue
-  sem addNodeSpec aliases json =
+  sem addNodeSpec env json =
   | PTNSensor t ->
     let sensorEntry = JsonArray [makeExternalJsonObject t.id t.rate] in
     let json = mapInsertWith concatJsonArray "sensors" sensorEntry json in
 
     -- Add information about all outgoing connections from this sensor.
     let src = Sensor {id = t.id, ty = t.ty, info = t.info} in
-    let connections = JsonArray (map (makeConnectionJsonObject aliases src) t.outputs) in
+    let connections = JsonArray (map (makeConnectionJsonObject env src) t.outputs) in
     mapInsertWith concatJsonArray "connections" connections json
   | PTNActuator t ->
     let actuatorEntry = JsonArray [makeExternalJsonObject t.id t.rate] in
@@ -64,6 +75,7 @@ lang ProbTimeJson = ProbTimeAst + ProbTimeCodegenBase
       ("importance", JsonFloat (int2float t.importance)),
       ("minrate", JsonInt t.minDelay),
       ("maxrate", JsonInt t.maxDelay),
+      ("configurable", JsonBool (setMem t.id env.configurableTasks)),
       ("particles", JsonInt 0),
       ("budget", JsonInt 0),
       ("core", JsonInt 0)
@@ -79,15 +91,15 @@ lang ProbTimeJson = ProbTimeAst + ProbTimeCodegenBase
             let src = Task {
               id = t.id, label = label, isOutput = true, ty = ty, info = t.info
             } in
-            concat acc (map (makeConnectionJsonObject aliases src) dsts))
+            concat acc (map (makeConnectionJsonObject env src) dsts))
           [] t.outputs)
     in
     mapInsertWith concatJsonArray "connections" connections json
 
-  sem makeConnectionJsonObject : Map Name PTType -> PTPort -> PTPort -> JsonValue
-  sem makeConnectionJsonObject aliases src =
+  sem makeConnectionJsonObject : JsonSpecEnv -> PTPort -> PTPort -> JsonValue
+  sem makeConnectionJsonObject env src =
   | dst ->
-    let ty = resolveTypeAlias aliases (ptPortType src) in
+    let ty = resolveTypeAlias env.aliases (ptPortType src) in
     match computeMessageSizeByType ty with (baseSize, perParticleSize) in
     -- TODO(larshum, 2024-11-05): Add an approach for estimating an upper bound
     -- on the number of messages sent per task instance.
