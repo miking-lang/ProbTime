@@ -35,7 +35,7 @@ let mayExceedBufferSize = lam bufferSize. lam tasks. lam c.
 
 let deserializeBufferSize : Map String JsonValue -> Int = lam json.
   match jsonLookup "compileopts" json with JsonObject kvs then
-    jsonUnwrap (jsonDeserializeInt (jsonLookup "buffer-size" kvs))
+    jsonUnwrap (jsonDeserializeInt (jsonLookup "bufferSize" kvs))
   else jsonFail ()
 
 let verifyBufferSizes = lam path.

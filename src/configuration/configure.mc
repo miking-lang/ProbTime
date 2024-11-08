@@ -118,15 +118,6 @@ let findVerticesWithIndegreeZero = lam g.
   let vertices = setOfSeq (digraphCmpv g) (digraphVertices g) in
   foldl removeDestination vertices (digraphEdges g)
 
--- We find the maximum offset from the line with the given slope and intercept
--- to a line with the same slope passing through an observation.
-let maxObsIntercept = lam slope. lam observations.
-  mapFoldWithKey
-    (lam maxOfs. lam nparticles. lam wcet.
-      let ofs = subf (int2float wcet) (mulf (int2float nparticles) slope) in
-      maxf ofs maxOfs)
-    0.0 observations
-
 let validateState = lam options. lam particleFairness. lam tasks.
   let validatePf = lam tasks.
     let wcets = repeatRunTasks options tasks in
@@ -300,7 +291,7 @@ let configureTasksExecutionTimeFairness = lam options. lam taskGraph. lam tasks.
         let taskState =
           { particles = 1, budget = task.budget
           , lowerBound = 1, upperBound = defaultUpperBound
-          , finished = false }
+          , finished = not task.configurable }
         in
         mapInsert task.id taskState state)
       (mapEmpty cmpString)

@@ -16,6 +16,10 @@ type TaskData = {
   -- The number of particles used in the task.
   particles : Int,
 
+  -- True when the task contains an infer for which the number of particles are
+  -- not specified ahead of time, i.e., where we have to do this automatically.
+  configurable : Bool,
+
   -- The execution time budget allocated to the task. Before we compute the
   -- budgets of tasks, we use this field to store the base worst-case execution
   -- time of the task.
@@ -32,7 +36,7 @@ type TaskData = {
 
 let defaultTaskData = {
   id = "", period = 0, importance = 1.0, particles = 1,
-  budget = 0, core = 1, index = 0
+  budget = 0, core = 1, index = 0, configurable = false
 }
 
 type PortSpec = {
