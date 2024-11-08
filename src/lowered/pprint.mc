@@ -224,10 +224,14 @@ lang ProbTimeStmtPrettyPrint =
     (env, join [
       "while ", cond, upd, " {\n", strJoin "\n" body, pprintNewline indent, "}"
     ])
-  | PTSAssign {target = target, e = e} ->
-    match pprintPTExpr env target with (env, target) in
+  | PTSAssignVar {id = id, e = e} ->
+    match pprintEnvGetStr env id with (env, id) in
     match pprintPTExpr env e with (env, e) in
-    (env, join [target, " = ", e])
+    (env, join [id, " = ", e])
+  | PTSAssignProj {id = id, label = label, e = e} ->
+    match pprintEnvGetStr env id with (env, id) in
+    match pprintPTExpr env e with (env, e) in
+    (env, join [id, ".", label, " = ", e])
   | PTSFunctionCall {id = id, args = args} ->
     match pprintEnvGetStr env id with (env, id) in
     match mapAccumL pprintPTExpr env args with (env, args) in

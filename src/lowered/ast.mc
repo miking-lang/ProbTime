@@ -220,9 +220,9 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
     -- construct.
     bodyParamId : Name,
 
-    -- The identifiers in which the updated value of the parameter is stored,
-    -- for each body of the construct.
-    bodyResultIds : [Name],
+    -- The identifiers storing the name of the most recent value of the
+    -- parameter, for each branch.
+    bodyResultIds : (Name, Name),
 
     -- The identifier to which the result of the construct is stored and
     -- accessible in code following the construct.
@@ -245,7 +245,8 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
   | PTSCondition {cond : PTExpr, upd : UpdateEntry, thn : [PTStmt], els : [PTStmt], info : Info}
   | PTSForLoop {id : Name, e : PTExpr, upd : UpdateEntry, body : [PTStmt], info : Info}
   | PTSWhileLoop {cond : PTExpr, upd : UpdateEntry, body : [PTStmt], info : Info}
-  | PTSAssign {target : PTExpr, e : PTExpr, info : Info}
+  | PTSAssignVar {id : Name, e : PTExpr, info : Info}
+  | PTSAssignProj {id : Name, label : String, e : PTExpr, resId : Name, info : Info}
   | PTSFunctionCall {id : Name, args : [PTExpr], info : Info}
 
   sem ptStmtInfo : PTStmt -> Info
@@ -262,7 +263,8 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
   | PTSCondition t -> t.info
   | PTSForLoop t -> t.info
   | PTSWhileLoop t -> t.info
-  | PTSAssign t -> t.info
+  | PTSAssignVar t -> t.info
+  | PTSAssignProj t -> t.info
   | PTSFunctionCall t -> t.info
 
   sem smapAccumLPTStmtPTStmt : all a. SMapAccumL PTStmt PTStmt a
@@ -323,10 +325,12 @@ lang ProbTimeStmtAst = ProbTimeTypeAst + ProbTimeExprAst
   | PTSWhileLoop t ->
     match f acc t.cond with (acc, cond) in
     (acc, PTSWhileLoop {t with cond = cond})
-  | PTSAssign t ->
-    match f acc t.target with (acc, target) in
+  | PTSAssignVar t ->
     match f acc t.e with (acc, e) in
-    (acc, PTSAssign {t with target = target, e = e})
+    (acc, PTSAssignVar {t with e = e})
+  | PTSAssignProj t ->
+    match f acc t.e with (acc, e) in
+    (acc, PTSAssignProj {t with e = e})
   | PTSFunctionCall t ->
     match mapAccumL f acc t.args with (acc, args) in
     (acc, PTSFunctionCall {t with args = args})

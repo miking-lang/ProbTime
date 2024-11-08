@@ -89,11 +89,14 @@ lang ProbTimeSymStmt = ProbTimeSymType + ProbTimeSymExpr + ProbTimeStmtAst
     let e = symbolizePTExpr env t.e in
     ({env with varEnv = varEnv}, PTSBinding {t with id = id, ty = ty, e = e})
   | PTSCondition t ->
-    let cond = symbolizePTExpr env t.cond in
     match symbolizeUpdName t.info env t.upd with (bodyEnv, postEnv, upd) in
+    -- NOTE(larshum, 2024-11-07): We symbolize the conditional expression in
+    -- the environment including the update variable because the resulting code
+    -- runs the condition inside a recursive function.
+    let cond = symbolizePTExpr bodyEnv t.cond in
     match mapAccumL symbolizePTStmt bodyEnv t.thn with (thnEnv, thn) in
     match mapAccumL symbolizePTStmt bodyEnv t.els with (elsEnv, els) in
-    let upd = findFinalUpdSymbols [thnEnv, elsEnv] upd in
+    let upd = findFinalUpdSymbols (thnEnv, elsEnv) upd in
     (postEnv, PTSCondition {t with cond = cond, upd = upd, thn = thn, els = els})
   | PTSForLoop t ->
     let e = symbolizePTExpr env t.e in
@@ -101,14 +104,23 @@ lang ProbTimeSymStmt = ProbTimeSymType + ProbTimeSymExpr + ProbTimeStmtAst
     match updateSymbol bodyEnv.varEnv t.id with (varEnv, id) in
     let bodyEnv = {bodyEnv with varEnv = varEnv} in
     match mapAccumL symbolizePTStmt bodyEnv t.body with (finalBodyEnv, body) in
-    let upd = findFinalUpdSymbols [finalBodyEnv] upd in
+    let upd = findFinalUpdSymbols (finalBodyEnv, env) upd in
     (postEnv, PTSForLoop {t with id = id, e = e, upd = upd, body = body})
   | PTSWhileLoop t ->
-    let cond = symbolizePTExpr env t.cond in
     match symbolizeUpdName t.info env t.upd with (bodyEnv, postEnv, upd) in
+    let cond = symbolizePTExpr bodyEnv t.cond in
     match mapAccumL symbolizePTStmt bodyEnv t.body with (finalBodyEnv, body) in
-    let upd = findFinalUpdSymbols [finalBodyEnv] upd in
+    let upd = findFinalUpdSymbols (finalBodyEnv, bodyEnv) upd in
     (postEnv, PTSWhileLoop {t with cond = cond, upd = upd, body = body})
+  | PTSAssignVar t ->
+    let e = symbolizePTExpr env t.e in
+    match updateSymbol env.varEnv t.id with (varEnv, id) in
+    ({env with varEnv = varEnv}, PTSAssignVar {t with id = id, e = e})
+  | PTSAssignProj t ->
+    let id = lookupSymbol t.info env.varEnv t.id in
+    let e = symbolizePTExpr env t.e in
+    match updateSymbol env.varEnv id with (postVarEnv, resultId) in
+    ({env with varEnv = postVarEnv}, PTSAssignProj {t with id = id, e = e, resId = resultId})
   | PTSFunctionCall t ->
     let id = lookupSymbol t.info env.varEnv t.id in
     let args = map (symbolizePTExpr env) t.args in
@@ -130,7 +142,7 @@ lang ProbTimeSymStmt = ProbTimeSymType + ProbTimeSymExpr + ProbTimeStmtAst
     , Some {t with preId = preId, bodyParamId = bodyParamId, postId = postId} )
   | None () -> (env, env, None ())
 
-  sem findFinalUpdSymbols : [PTSymEnv] -> UpdateEntry -> UpdateEntry
+  sem findFinalUpdSymbols : (PTSymEnv, PTSymEnv) -> UpdateEntry -> UpdateEntry
   sem findFinalUpdSymbols envs =
   | Some t ->
     let lookupUpdSymbol = lam env.
@@ -138,7 +150,7 @@ lang ProbTimeSymStmt = ProbTimeSymType + ProbTimeSymExpr + ProbTimeStmtAst
         (lam. error "Internal error in symbolization of lowered ProbTime AST (update symbols)")
         (mapLookup (nameGetStr t.bodyParamId) env.varEnv)
     in
-    Some {t with bodyResultIds = map lookupUpdSymbol envs}
+    Some {t with bodyResultIds = (lookupUpdSymbol envs.0, lookupUpdSymbol envs.1)}
   | None _ -> None ()
 end
 

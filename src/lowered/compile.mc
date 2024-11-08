@@ -152,20 +152,18 @@ lang ProbTimeLowerStmt =
       cond = lowerRtpplExpr t.cond, upd = updVar,
       body = map (lowerRtpplStmt inputPortTypes) t.body, info = t.info }
   | IdentPlusStmtRtpplStmt (t & {next = ReassignRtpplStmtNoIdent {proj = None _, e = e}}) ->
-    let target = PTEVar {id = t.id.v, info = t.id.i} in
-    PTSAssign {target = target, e = lowerRtpplExpr e, info = t.info}
+    PTSAssignVar {id = t.id.v, e = lowerRtpplExpr e, info = t.info}
   | IdentPlusStmtRtpplStmt (t & {next = ReassignRtpplStmtNoIdent {proj = Some proj, e = e}}) ->
-    let target = PTEProjection {
-      id = t.id.v, proj = proj.v, info = mergeInfo t.id.i proj.i
-    } in
-    PTSAssign {target = target, e = lowerRtpplExpr e, info = t.info}
+    let id = t.id.v in
+    PTSAssignProj {
+      id = id, label = proj.v, e = lowerRtpplExpr e, resId = id, info = t.info }
   | IdentPlusStmtRtpplStmt (t & {next = FunctionCallSRtpplStmtNoIdent {args = args}}) ->
     PTSFunctionCall {id = t.id.v, args = map lowerRtpplExpr args, info = t.info}
 
   sem getUpdateVarIdentifier : Option {v : Name, i : Info} -> UpdateEntry
   sem getUpdateVarIdentifier =
   | Some {v = id} ->
-    Some {preId = id, bodyParamId = id, bodyResultIds = [], postId = id}
+    Some {preId = id, bodyParamId = id, bodyResultIds = (id, id), postId = id}
   | None _ -> None ()
 end
 

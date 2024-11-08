@@ -330,64 +330,54 @@ lang ProbTimeCodegenStmt =
     in
     withInfoRec info (nlet_ id ty (compileProbTimeExpr e))
   | PTSCondition {cond = cond, upd = upd, thn = thn, els = els, info = info} ->
-    match getUpdParams upd with (preExpr, tailExprs, bodyId, postId) in
+    match getUpdParams upd with (preExpr, (thnTail, elsTail), bodyId, postId) in
     let cond = compileProbTimeExpr cond in
-    match
-      match tailExprs with [thnTail, elsTail] then
-        ( compileProbTimeStmts env thnTail thn
-        , compileProbTimeStmts env elsTail els )
-      else match tailExprs with [tailExpr] in
-        ( compileProbTimeStmts env tailExpr thn
-        , compileProbTimeStmts env tailExpr els )
-    with (thn, els) in
+    let thn = compileProbTimeStmts env thnTail thn in
+    let els = compileProbTimeStmts env elsTail els in
     let condExpr = app_ (nulam_ bodyId (if_ cond thn els)) preExpr in
     withInfoRec info (nulet_ postId condExpr)
   | PTSForLoop {id = id, e = e, upd = upd, body = body, info = info} ->
-    match getUpdParams upd with (preExpr, [tailExpr], bodyId, postId) in
+    match getUpdParams upd with (preExpr, (tailExpr, _), bodyId, postId) in
     let body = compileProbTimeStmts env tailExpr body in
     let funExpr = nulam_ bodyId (nulam_ id body) in
     let e = compileProbTimeExpr e in
     withInfoRec info (nulet_ postId (foldl_ funExpr preExpr e))
   | PTSWhileLoop {cond = cond, upd = upd, body = body, info = info} ->
-    match getUpdParams upd with (preExpr, [tailExpr], bodyId, postId) in
+    match getUpdParams upd with (preExpr, (thnExpr, elsExpr), bodyId, postId) in
     let loopId = nameSym "while" in
     let cond = compileProbTimeExpr cond in
-    let body = compileProbTimeStmts env (app_ (nvar_ loopId) tailExpr) body in
-    let loopBody = if_ cond body tailExpr in
+    let body = compileProbTimeStmts env (app_ (nvar_ loopId) thnExpr) body in
+    let loopBody = if_ cond body elsExpr in
     let resultBinding = nulet_ postId (app_ (nvar_ loopId) preExpr) in
     withInfoRec info
-      (bind_ (nureclets_ [(loopId, nulam_ bodyId body)]) resultBinding)
-  | PTSAssign {target = target, e = e, info = info} ->
+      (bind_ (nureclets_ [(loopId, nulam_ bodyId loopBody)]) resultBinding)
+  | PTSAssignVar {id = id, e = e, info = info} ->
     let e = compileProbTimeExpr e in
-    match
-      match target with PTEVar {id = id, info = i1} then
-        (id, e)
-      else match target with PTEProjection {id = id, proj = proj, info = i1} then
-        (id, recordupdate_ (nvar_ id) proj e)
-      else errorSingle [ptExprInfo target] "Invalid target of assignment statement"
-    with (id, body) in
-    withInfoRec info (nulet_ id body)
+    withInfoRec info (nulet_ id e)
+  | PTSAssignProj {id = id, label = label, e = e, resId = resId, info = info} ->
+    let e = compileProbTimeExpr e in
+    withInfoRec info (nulet_ resId (recordupdate_ (nvar_ id) label e))
   | PTSFunctionCall {id = id, args = args, info = info} ->
     let args = if null args then [unit_] else map compileProbTimeExpr args in
-    withInfoRec info (appSeq_ (nvar_ id) args)
+    withInfoRec info (ulet_ "" (appSeq_ (nvar_ id) args))
 
   -- NOTE(larshum, 2024-11-05): Produce the expressions and names required to
   -- represent the various components of the update term:
   --  1. A variable representing the value prior to the construct.
-  --  2. Variables representing the final result for each separate body of the
-  --     construct.
+  --  2. Variables representing the final result for each separate branch of
+  --     the construct.
   --  3. The name used for the corresponding parameter, in the body of the
   --     construct.
   --  4. The name used for storing the result and which we refer to in code
   --     after the construct.
-  sem getUpdParams : UpdateEntry -> (Expr, [Expr], Name, Name)
+  sem getUpdParams : UpdateEntry -> (Expr, (Expr, Expr), Name, Name)
   sem getUpdParams =
   | Some {preId = preId, bodyParamId = bodyParamId,
-          bodyResultIds = bodyResultIds, postId = postId} ->
-    (nvar_ preId, map nvar_ bodyResultIds, bodyParamId, postId)
+          bodyResultIds = (fst, snd), postId = postId} ->
+    (nvar_ preId, (nvar_ fst, nvar_ snd), bodyParamId, postId)
   | None _ ->
     let id = nameNoSym "" in
-    (uunit_, [uunit_], id, id)
+    (uunit_, (uunit_, uunit_), id, id)
 end
 
 lang ProbTimeCodegenTop =
