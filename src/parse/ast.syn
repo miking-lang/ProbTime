@@ -160,8 +160,7 @@ prod Sensor : RtpplExt = "sensor" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
 prod Actuator : RtpplExt = "actuator" id:LName ":" ty:RtpplType "rate" r:RtpplExpr
 
 prod Task : RtpplTask =
-  "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")" "with"
-  "{" key:LIdent "=" value:Integer ("," key:LIdent "=" value:Integer)* "}"
+  "task" id:LName "=" templateId:UName "(" (args:RtpplExpr ("," args:RtpplExpr)*)? ")"
 prod Connection : RtpplConnection = from:RtpplPortSpec "->" to:RtpplPortSpec
 prod PortSpec : RtpplPortSpec = port:LName ("." id:LIdent)?
 

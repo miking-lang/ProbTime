@@ -72,9 +72,9 @@ lang ProbTimeJson =
   | PTNTask t ->
     let taskEntry = JsonArray [JsonObject (mapFromSeq cmpString [
       ("id", JsonString (nameGetStr t.id)),
-      ("importance", JsonFloat (int2float t.importance)),
-      ("minrate", JsonInt t.minDelay),
-      ("maxrate", JsonInt t.maxDelay),
+      ("importance", JsonFloat 1.0),
+      ("minrate", JsonInt 0),
+      ("maxrate", JsonInt 0),
       ("configurable", JsonBool (setMem t.id env.configurableTasks)),
       ("particles", JsonInt 0),
       ("budget", JsonInt 0),

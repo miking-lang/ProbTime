@@ -449,7 +449,7 @@ lang ProbTimeCodegenSystem =
   sem compileTask : PTCompileEnv -> CompileResult -> PTNode -> CompileResult
   sem compileTask env acc =
   | (PTNTask {id = id, template = template, args = args, inputs = inputs,
-              outputs = outputs, importance = importance, info = info}) & task ->
+              outputs = outputs, info = info}) & task ->
     let args = map (resolveConstants env.consts) args in
     let liftedArgsTask = getCapturedTopLevelVars info env template in
     let args = join [

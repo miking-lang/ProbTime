@@ -410,38 +410,10 @@ lang ProbTimeLowerMain =
         (digraphEdgesTo id g)
     in
     let args = map lowerRtpplExpr t.args in
-    match extractRequiredTaskKeyValuePairs t.info (zip t.key t.value)
-    with [importance, minDelay, maxDelay] in
     PTNTask {
       id = id, template = t.templateId.v, args = args, inputs = inputs,
-      outputs = outputs, importance = importance, minDelay = minDelay,
-      maxDelay = maxDelay, info = t.info
+      outputs = outputs, info = t.info
     }
-
-  type KeyValuePairs = [({i : Info, v : String}, {i : Info, v : Int})]
-
-  sem extractRequiredTaskKeyValuePairs : Info -> KeyValuePairs -> [Int]
-  sem extractRequiredTaskKeyValuePairs info =
-  | kvs ->
-    let m = extractTaskKeyValuePairs (mapEmpty cmpString) kvs in
-    let requiredKeys = ["importance", "minDelay", "maxDelay"] in
-    lookupRequiredKeys info m requiredKeys
-
-  sem extractTaskKeyValuePairs
-    : Map String Int -> [({i : Info, v : String}, {i : Info, v : Int})]
-   -> Map String Int
-  sem extractTaskKeyValuePairs acc =
-  | [({v = key}, {v = value})] ++ kvs ->
-    extractTaskKeyValuePairs (mapInsert key value acc) kvs
-  | [] -> acc
-
-  sem lookupRequiredKeys : Info -> Map String Int -> [String] -> [Int]
-  sem lookupRequiredKeys info m =
-  | [requiredKey] ++ keys ->
-    match mapLookup requiredKey m with Some v then
-      cons v (lookupRequiredKeys info m keys)
-    else errorSingle [info] (join ["Missing required task parameter: ", requiredKey])
-  | [] -> []
 end
 
 lang ProbTimeLower = ProbTimeAst + ProbTimeLowerMain + ProbTimeLowerTop

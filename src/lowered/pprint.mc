@@ -360,12 +360,10 @@ lang ProbTimeMainPrettyPrint =
       "  actuator ", id, " : ", ty, " rate ", rate, "\n", strJoin "\n" inputs
     ])
   | PTNTask {id = id, template = template, args = args, inputs = inputs,
-             outputs = outputs, importance = importance, minDelay = minDelay,
-             maxDelay = maxDelay, info = info} ->
+             outputs = outputs, info = info} ->
     match pprintEnvGetStr env id with (env, idStr) in
     match pprintEnvGetStr env template with (env, template) in
     match mapAccumL pprintPTExpr env args with (env, args) in
-    let withStr = pprintWithArgs importance minDelay maxDelay in
     match
       mapMapAccum
         (lam env. lam dstLabel. lam srcs.
@@ -387,8 +385,7 @@ lang ProbTimeMainPrettyPrint =
         env outputs
     with (env, outputs) in
     (env, join [
-      "  task ", idStr, " = ", template, "(", strJoin ", " args, ") with ",
-      withStr, "\n",
+      "  task ", idStr, " = ", template, "(", strJoin ", " args, ")\n",
       strJoin "\n"
         (concat (join (mapValues inputs)) (join (mapValues outputs)))
     ])
@@ -415,20 +412,6 @@ lang ProbTimeMainPrettyPrint =
   | extPort ->
     match pprintEnvGetStr env extPort with (env, extPort) in
     (env, ppConn extPort label)
-
-  sem pprintWithArgs : Int -> Int -> Int -> String
-  sem pprintWithArgs importance minDelay =
-  | maxDelay ->
-    let f = lam x.
-      match x with (key, value) in
-      join [key, " = ", printIntWithSuffix value]
-    in
-    let args =
-      [ ("importance", importance)
-      , ("minDelay", minDelay)
-      , ("maxDelay", maxDelay) ]
-    in
-    join ["{", strJoin ", " (map f args), "}"]
 end
 
 lang ProbTimePrettyPrint =

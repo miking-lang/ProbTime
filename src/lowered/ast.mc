@@ -439,8 +439,7 @@ lang ProbTimeMainAst = ProbTimeStmtAst + ProbTimeTypeAst + ProbTimeExprAst
   | PTNActuator {id : Name, ty : PTType, rate : PTExpr, inputs : [PTPort], info : Info}
   | PTNTask {
       id : Name, template : Name, args : [PTExpr], inputs : Map String [PTPort],
-      outputs : Map String [PTPort], importance : Int, minDelay : Int,
-      maxDelay : Int, info : Info
+      outputs : Map String [PTPort], info : Info
     }
 
   sem ptNodeInfo : PTNode -> Info
