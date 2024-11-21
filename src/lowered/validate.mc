@@ -1,5 +1,8 @@
 include "ast.mc"
 
+include "error.mc"
+include "set.mc"
+
 -- NOTE(larshum, 2024-10-30): Validates the system defined in the ProbTime AST.
 -- This includes validating that:
 --  1. All sensors are used at least once.
@@ -148,6 +151,6 @@ lang ProbTimeValidate = ProbTimeValidateSystem + ProbTimeValidateNames
   sem validateProbTimeProgram =
   | {tops = tops, system = system} ->
     let templatePorts = foldl collectTemplatePorts (mapEmpty nameCmp) tops in
-    map (validateNode templatePorts) system;
+    iter (validateNode templatePorts) system;
     ensureDistinctSystemNames system
 end

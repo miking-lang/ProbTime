@@ -5,6 +5,7 @@ include "ast.mc"
 include "map.mc"
 include "name.mc"
 include "mexpr/info.mc"
+include "mexpr/symbolize.mc"
 
 lang ProbTimeSymBase
   type PTSymEnv = {

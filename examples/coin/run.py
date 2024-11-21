@@ -9,17 +9,6 @@ files = ["cf.in1", "bias"]
 for f in files:
     open(f, "w").close()
 
-# Set the mindelay and maxdelay values of the coin task (cf) to indicate that
-# it is periodic.
-with open("system.json", "r+") as f:
-    data = json.load(f)
-    for t in data['tasks']:
-        t['minrate'] = 10**9
-        t['maxrate'] = 10**9
-    f.seek(0)
-    json.dump(data, f)
-    f.truncate()
-
 cmds = [
     ["python3", "producer.py"],
     ["python3", "consumer.py"],

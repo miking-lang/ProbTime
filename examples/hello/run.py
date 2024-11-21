@@ -9,20 +9,6 @@ files = ["a.in1", "b.in1", "dst"]
 for f in files:
     open(f, "w").close()
 
-# Set the mindelay and maxdelay of the tasks
-with open("system.json", "r+") as f:
-    data = json.load(f)
-    for t in data['tasks']:
-        if t['id'] == 'a':
-            delay = 500 * 10**6
-        elif t['id'] == 'b':
-            delay = 250 * 10**6
-        t['minrate'] = delay
-        t['maxrate'] = delay
-    f.seek(0)
-    json.dump(data, f)
-    f.truncate()
-
 cmds = [
     ["python3", "producer.py"],
     ["python3", "consumer.py"],
