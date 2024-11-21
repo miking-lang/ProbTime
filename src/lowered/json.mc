@@ -9,11 +9,13 @@ include "stdlib::json.mc"
 -- and the lowered ProbTime AST. This specification allow us to adjust
 -- properties of the system after compilation.
 lang ProbTimeJson =
-  ProbTimeAst + ProbTimeCodegenBase + ProbTimeTaskConfigurableInfer
+  ProbTimeAst + ProbTimeCodegenBase + ProbTimeTaskConfigurableInfer +
+  ProbTimeInterArrivalTimes
 
   type JsonSpecEnv = {
     aliases : Map Name PTType,
-    configurableTasks : Set Name
+    configurableTasks : Set Name,
+    taskArrivalTimes : Map Name (Int, Int)
   }
 
   sem generateJsonSpecification : RtpplOptions -> PTProgram -> ()
@@ -28,7 +30,8 @@ lang ProbTimeJson =
   | program ->
     let env = {
       aliases = foldl addTypeAliasMapping (mapEmpty nameCmp) program.tops,
-      configurableTasks = findTasksWithConfigurableInfer program
+      configurableTasks = findTasksWithConfigurableInfer program,
+      taskArrivalTimes = findTaskInterArrivalTimes program
     } in
     let json = foldl (addNodeSpec env) (mapEmpty cmpString) program.system in
 
@@ -70,11 +73,16 @@ lang ProbTimeJson =
     let actuatorEntry = JsonArray [makeExternalJsonObject t.id t.rate] in
     mapInsertWith concatJsonArray "actuators" actuatorEntry json
   | PTNTask t ->
+    match
+      match mapLookup t.id env.taskArrivalTimes with Some (mina, maxa) then
+        (mina, maxa)
+      else errorSingle [t.info] "Could not find arrival time bounds for task"
+    with (minArrivalTime, maxArrivalTime) in
     let taskEntry = JsonArray [JsonObject (mapFromSeq cmpString [
       ("id", JsonString (nameGetStr t.id)),
-      ("importance", JsonFloat 1.0),
-      ("minrate", JsonInt 0),
-      ("maxrate", JsonInt 0),
+      ("importance", JsonFloat 0.0),
+      ("minarrival", JsonInt minArrivalTime),
+      ("maxarrival", JsonInt maxArrivalTime),
       ("configurable", JsonBool (setMem t.id env.configurableTasks)),
       ("particles", JsonInt 0),
       ("budget", JsonInt 0),

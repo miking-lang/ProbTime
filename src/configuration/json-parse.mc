@@ -31,8 +31,8 @@ let updateTasks : JsonValue -> [TaskData] -> JsonValue = lam json. lam tasks.
         let mapping = [
           ("id", jsonSerializeString t.id),
           ("importance", jsonSerializeFloat t.importance),
-          ("minrate", jsonSerializeInt t.period),
-          ("maxrate", jsonSerializeInt t.period),
+          ("minarrival", jsonSerializeInt t.period),
+          ("maxarrival", jsonSerializeInt t.period),
           ("configurable", jsonSerializeBool t.configurable),
           ("particles", jsonSerializeInt t.particles),
           ("budget", jsonSerializeInt t.budget),
@@ -56,8 +56,8 @@ let deserializeTasks : JsonValue -> [TaskData] = lam tasks.
   let deserializeTask = lam t.
     match t with JsonObject kvs then
       let id = jsonUnwrap (jsonDeserializeString (jsonLookup "id" kvs)) in
-      let minrate = jsonUnwrap (jsonDeserializeInt (jsonLookup "minrate" kvs)) in
-      let maxrate = jsonUnwrap (jsonDeserializeInt (jsonLookup "minrate" kvs)) in
+      let minrate = jsonUnwrap (jsonDeserializeInt (jsonLookup "minarrival" kvs)) in
+      let maxrate = jsonUnwrap (jsonDeserializeInt (jsonLookup "maxarrival" kvs)) in
       if neqi minrate maxrate then error (join ["Cannot configure aperiodic task ", id])
       else
         Some { defaultTaskData with

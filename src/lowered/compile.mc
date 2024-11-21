@@ -409,11 +409,21 @@ lang ProbTimeLowerMain =
         (mapEmpty cmpString)
         (digraphEdgesTo id g)
     in
-    let args = map lowerRtpplExpr t.args in
+    let args = map lowerRtpplTemplateArg t.args in
     PTNTask {
       id = id, template = t.templateId.v, args = args, inputs = inputs,
       outputs = outputs, info = t.info
     }
+
+  -- NOTE(larshum, 2024-11-20): We use this function to constrain the types of
+  -- allowed arguments to a template. Specifically, we assume this is always a
+  -- literal value.
+  sem lowerRtpplTemplateArg : RtpplExpr -> PTExpr
+  sem lowerRtpplTemplateArg =
+  | LiteralRtpplExpr t ->
+    PTELiteral {const = lowerRtpplConst t.const, info = t.info}
+  | e ->
+    errorSingle [get_RtpplExpr_info e] "Template argument must be a literal value"
 end
 
 lang ProbTimeLower = ProbTimeAst + ProbTimeLowerMain + ProbTimeLowerTop

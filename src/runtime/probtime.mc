@@ -59,8 +59,8 @@ let readJsonConfig = lam configFile. lam taskId.
   let numParticles = getJsonIntExn jsonTask "particles" in
   let budget = getJsonIntExn jsonTask "budget" in
   let slowdown = getJsonIntExn (getJsonValueExn config "config") "slowdown" in
-  let maxArrivalTime = getJsonIntExn jsonTask "maxrate" in
-  let minArrivalTime = getJsonIntExn jsonTask "minrate" in
+  let maxArrivalTime = getJsonIntExn jsonTask "maxarrival" in
+  let minArrivalTime = getJsonIntExn jsonTask "minarrival" in
   (numParticles, budget, slowdown, minArrivalTime, maxArrivalTime)
 
 let rtpplReadConfigurationFile = lam taskId.
