@@ -3,7 +3,6 @@ include "digraph.mc"
 include "map.mc"
 include "sys.mc"
 
-include "buffers.mc"
 include "definitions.mc"
 include "json-parse.mc"
 include "regression.mc"
@@ -81,9 +80,6 @@ let repeatRunTasks : ConfigureOptions -> [TaskData] -> Map String Int =
 
   -- Update the particle count of all tasks in the configuration file.
   writeTaskConfig options.systemPath tasks;
-
-  -- Verify that the buffer size is sufficient for all connections.
-  verifyBufferSizes options.systemPath;
 
   -- Repeatedly run the tasks while collecting their WCETs
   let res =

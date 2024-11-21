@@ -13,7 +13,6 @@ lang ProbTimeJson =
   ProbTimeInterArrivalTimes
 
   type JsonSpecEnv = {
-    aliases : Map Name PTType,
     configurableTasks : Set Name,
     taskArrivalTimes : Map Name (Int, Int)
   }
@@ -29,7 +28,6 @@ lang ProbTimeJson =
   sem makeJsonSystemSpecification options =
   | program ->
     let env = {
-      aliases = foldl addTypeAliasMapping (mapEmpty nameCmp) program.tops,
       configurableTasks = findTasksWithConfigurableInfer program,
       taskArrivalTimes = findTaskInterArrivalTimes program
     } in
@@ -52,11 +50,6 @@ lang ProbTimeJson =
     let json = mapInsert "config" config json in
 
     JsonObject json
-
-  sem addTypeAliasMapping : Map Name PTType -> PTTop -> Map Name PTType
-  sem addTypeAliasMapping aliases =
-  | PTTTypeAlias t -> mapInsert t.id (resolveTypeAlias aliases t.ty) aliases
-  | _ -> aliases
 
   sem addNodeSpec : JsonSpecEnv -> Map String JsonValue -> PTNode
                  -> Map String JsonValue
@@ -107,47 +100,10 @@ lang ProbTimeJson =
   sem makeConnectionJsonObject : JsonSpecEnv -> PTPort -> PTPort -> JsonValue
   sem makeConnectionJsonObject env src =
   | dst ->
-    let ty = resolveTypeAlias env.aliases (ptPortType src) in
-    match computeMessageSizeByType ty with (baseSize, perParticleSize) in
-    -- TODO(larshum, 2024-11-05): Add an approach for estimating an upper bound
-    -- on the number of messages sent per task instance.
-    let messagesPerInstance = 0.0 in
     JsonObject (mapFromSeq cmpString [
       ("from", JsonString (ptPortName src)),
-      ("to", JsonString (ptPortName dst)),
-      ("messageBaseSize", JsonInt (baseSize)),
-      ("messagePerParticleSize", JsonInt (perParticleSize)),
-      ("messagesPerInstance", JsonFloat (messagesPerInstance))
+      ("to", JsonString (ptPortName dst))
     ])
-
-  sem computeMessageSizeByType : PTType -> (Int, Int)
-  sem computeMessageSizeByType =
-  | ty ->
-    -- NOTE(larshum, 2024-11-05): In the current approach, all messages include
-    -- two 64-bit integers representing the size of the remainder of the
-    -- message (excluding itself) and a timestamp. We add this to the base cost
-    -- of each message.
-    match computeMessageSizeByTypeH ty with (base, perParticle) in
-    (addi base 16, perParticle)
-
-  sem computeMessageSizeByTypeH : PTType -> (Int, Int)
-  sem computeMessageSizeByTypeH =
-  | PTTInt _ | PTTFloat _ -> (8, 0)
-  | PTTRecord {fields = fields} ->
-    mapFoldWithKey
-      (lam acc. lam. lam ty.
-        match computeMessageSizeByTypeH ty with (base, perParticle) in
-        (addi acc.0 base, addi acc.1 perParticle))
-      (0, 0) fields
-  | PTTDist {ty = ty, info = info} ->
-    match computeMessageSizeByTypeH ty with (base, 0) then
-      -- NOTE(larshum, 2024-11-05): Each sample in a distribution consists of
-      -- the data of the base type plus a 64-bit floating-point weight. We have
-      -- no base overhead for the distribution itself in the current encoding.
-      (0, addi base 8)
-    else errorSingle [info] "Found nested distribution type in JSON generation"
-  | ty ->
-    errorSingle [ptTypeInfo ty] "Found unsupported type in JSON generation"
 
   sem concatJsonArray : JsonValue -> JsonValue -> JsonValue
   sem concatJsonArray lhs =

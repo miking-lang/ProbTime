@@ -52,10 +52,7 @@ let portSpecToString = lam ps.
 
 type Connection = {
   from : PortSpec,
-  to : PortSpec,
-  messageBaseSize : Int,
-  messagePerParticleSize : Int,
-  messageFrequency : Float
+  to : PortSpec
 }
 
 let systemSpecFile = "system.json"

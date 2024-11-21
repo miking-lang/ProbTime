@@ -85,10 +85,7 @@ let deserializeConnections : JsonValue -> [Connection] = lam connections.
   let deserializeConnection = lam c.
     match c with JsonObject kvs then
       { from = deserializePort (jsonLookup "from" kvs)
-      , to = deserializePort (jsonLookup "to" kvs)
-      , messageBaseSize = jsonUnwrap (jsonDeserializeInt (jsonLookup "messageBaseSize" kvs))
-      , messagePerParticleSize = jsonUnwrap (jsonDeserializeInt (jsonLookup "messagePerParticleSize" kvs))
-      , messageFrequency = jsonUnwrap (jsonDeserializeFloat (jsonLookup "messagesPerInstance" kvs)) }
+      , to = deserializePort (jsonLookup "to" kvs) }
     else jsonFail ()
   in
   match connections with JsonArray conns then
