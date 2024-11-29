@@ -48,7 +48,7 @@ lang ProbTimeCompileLang =
   sem buildTaskDppl options path =
   | taskAst ->
     let runtimeData = _rts () in
-    let dpplOpts = {default with extractSimplification = "inline"} in
+    let dpplOpts = {default with cps = "partial", extractSimplification = "inline"} in
     let taskAst = mexprCompile dpplOpts runtimeData taskAst in
     buildTaskMExpr options path taskAst
 
