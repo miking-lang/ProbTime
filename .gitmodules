@@ -1,0 +1,6 @@
+[submodule "miking"]
+	path = miking
+	url = git@github.com:miking-lang/miking.git
+[submodule "miking-dppl"]
+	path = miking-dppl
+	url = git@github.com:miking-lang/miking-dppl.git

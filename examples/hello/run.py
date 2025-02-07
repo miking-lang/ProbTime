@@ -1,10 +1,11 @@
+import json
 import signal
 import subprocess
 import sys
 import time
 
 # Clear leftover data from all input/output files of tasks a and b.
-files = ["a-in1", "b-in1", "dst"]
+files = ["a.in1", "b.in1", "dst"]
 for f in files:
     open(f, "w").close()
 

@@ -1,10 +1,11 @@
+import json
 import signal
 import subprocess
 import sys
 import time
 
 # Clear leftover data from all input/output files of the cf task.
-files = ["cf-in1", "bias"]
+files = ["cf.in1", "bias"]
 for f in files:
     open(f, "w").close()
 

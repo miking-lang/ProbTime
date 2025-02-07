@@ -1,16 +1,18 @@
 include "argparse.mc"
-include "ast.mc"
-include "compile.mc"
-include "connection-data.mc"
-include "pprint.mc"
-include "task-data.mc"
-include "validate.mc"
+include "parse/ast.mc"
+include "parse/pprint.mc"
+include "lowered/ast.mc"
+include "lowered/codegen.mc"
+include "lowered/compile.mc"
+include "lowered/json.mc"
+include "lowered/pprint.mc"
+include "lowered/validate.mc"
 
-include "json.mc"
-include "mexpr/shallow-patterns.mc"
-include "mexpr/type-check.mc"
-include "ocaml/mcore.mc"
-include "tuning/hole-cfa.mc"
+include "stdlib::json.mc"
+include "stdlib::mexpr/shallow-patterns.mc"
+include "stdlib::mexpr/type-check.mc"
+include "stdlib::ocaml/mcore.mc"
+include "stdlib::tuning/hole-cfa.mc"
 
 include "coreppl::dppl-arg.mc"
 include "coreppl::infer-method.mc"
@@ -22,176 +24,79 @@ let _rts = lam.
   use LoadRuntime in
   let _bpf = BPF {particles = int_ 1} in
   let _bpfRtEntry = loadRuntimeEntry _bpf "smc-bpf/runtime.mc" in
-  let _defaultRuntimes = mapFromSeq cmpInferMethod [(_bpf, _bpfRtEntry)] in
-  combineRuntimes default _defaultRuntimes
+  combineInferRuntimes default (mapFromSeq cmpInferMethod [(_bpf, _bpfRtEntry)])
 
-lang RtpplJson = RtpplAst + RtpplTaskData + RtpplConnectionData
-  type RtpplNames = {
-    sensors : [Name],
-    actuators : [Name]
-  }
+lang ProbTimeCompileLang =
+  ProbTimeLower + ProbTimeSym + ProbTimePrettyPrint +
+  ProbTimeValidate + ProbTimeCodegen + RtpplPrettyPrint + ProbTimeJson +
 
-  sem optJoinPath : String -> String -> String
-  sem optJoinPath path =
-  | file ->
-    if null path then file
-    else join [path, "/", file]
+  DPPLParser + MExprLowerNestedPatterns + MExprTypeCheck + MCoreCompileLang
 
-  sem collectSensorOrActuatorName : RtpplNames -> RtpplExt -> RtpplNames
-  sem collectSensorOrActuatorName acc =
-  | SensorRtpplExt {id = {v = id}} ->
-    {acc with sensors = cons id acc.sensors}
-  | ActuatorRtpplExt {id = {v = id}} ->
-    {acc with actuators = cons id acc.actuators}
-  | _ -> acc
+  sem buildProbTime : RtpplOptions -> PTProgram -> CompileResult -> ()
+  sem buildProbTime options program =
+  | tasks ->
+    generateJsonSpecification options program;
+    mapFoldWithKey (lam. lam k. lam v. buildTaskExecutable options k v) () tasks
 
-  sem taskToJsonObject : RtpplOptions -> Name -> TaskData -> JsonValue
-  sem taskToJsonObject options id =
-  | {period = period, priority = priority} ->
-    let mapping = [
-      ("id", JsonString (nameGetStr id)),
-      ("period", JsonInt period),
-      ("importance", JsonFloat priority),
-      ("particles", JsonInt options.defaultParticles),
-      ("budget", JsonInt 0),
-      ("core", JsonInt 0)
-    ] in
-    JsonObject (mapFromSeq cmpString mapping)
+  sem buildTaskExecutable : RtpplOptions -> Name -> Expr -> ()
+  sem buildTaskExecutable options taskId =
+  | taskAst ->
+    let path = optJoinPath (nameGetStr taskId) options.outputPath in
+    buildTaskDppl options path taskAst
 
-  sem connectionToJsonObject : ConnectionData -> JsonValue
-  sem connectionToJsonObject =
-  | c ->
-    let mapping = [
-      ("from", JsonString (portSpecToString c.from)),
-      ("to", JsonString (portSpecToString c.to)),
-      ("messageBaseSize", JsonInt (baseMessageSize c.ty)),
-      ("messagePerParticleSize", JsonInt (perParticleMessageSize c.ty)),
-      ("messagesPerInstance", JsonFloat c.maxMessages)
-    ] in
-    JsonObject (mapFromSeq cmpString mapping)
-
-  -- NOTE(larshum, 2024-04-17): We include an object representing parameters
-  -- that can be reconfigured without having to recompile.
-  sem defaultConfigObject : () -> JsonValue
-  sem defaultConfigObject =
-  | _ ->
-    let mapping = [
-      ("slowdown", JsonInt 1)
-    ] in
-    JsonObject (mapFromSeq cmpString mapping)
-
-  -- NOTE(larshum, 2024-04-17): We include an object representing parameters
-  -- used during compilation that may be of interest, but which cannot be
-  -- reconfigured without recompiling.
-  sem compileOptionsToJson : RtpplOptions -> JsonValue
-  sem compileOptionsToJson =
-  | opts ->
-    let mapping = [
-      ("buffer-size", JsonInt opts.bufferSize),
-      ("default-particles", JsonInt opts.defaultParticles)
-    ] in
-    JsonObject (mapFromSeq cmpString mapping)
-
-  sem makeJsonSpecification : RtpplOptions -> RtpplNames -> Map Name TaskData
-                           -> [ConnectionData] -> JsonValue
-  sem makeJsonSpecification options names taskData =
-  | connections ->
-    let nameToJsonString = lam id. JsonString (nameGetStr id) in
-    let topMappings = [
-      ("sensors", JsonArray (map nameToJsonString names.sensors)),
-      ("actuators", JsonArray (map nameToJsonString names.actuators)),
-      ("tasks", JsonArray (mapValues (mapMapWithKey (taskToJsonObject options) taskData))),
-      ("connections", JsonArray (map connectionToJsonObject connections)),
-      ("compileopts", compileOptionsToJson options),
-      ("config", defaultConfigObject ())
-    ] in
-    JsonObject (mapFromSeq cmpString topMappings)
-
-  sem generateJsonSystemSpecification : RtpplOptions -> RtpplProgram -> ()
-  sem generateJsonSystemSpecification options =
-  | prog & (ProgramRtpplProgram {main = MainRtpplMain {ext = ext}}) ->
-    let names = {sensors = [], actuators = []} in
-    let names = foldl collectSensorOrActuatorName names ext in
-    let taskData = collectProgramTaskData prog in
-    let connections = collectConnectionData prog in
-    let json = makeJsonSpecification options names taskData connections in
-    let path = optJoinPath options.outputPath "system.json" in
-    writeFile path (json2string json)
-end
-
-lang Rtppl =
-  RtpplCompile + RtpplValidate + RtpplPrettyPrint + RtpplJson +
-  MExprCompile + DPPLParser +
-  MExprLowerNestedPatterns + MExprTypeCheck + MCoreCompileLang
-
-  sem createFile : RtpplOptions -> String -> ()
-  sem createFile options =
-  | name ->
-    let path = optJoinPath options.outputPath name in
-    let ifFileExists = join ["[ -e ", path, " ]"] in
-    let touch = concat "touch " path in
-    match sysRunCommand [ifFileExists, "||", touch] "" "."
-    with {stderr = stderr, returncode = rc} in
-    if eqi rc 0 then ()
-    else
-      let msg = join ["Could not create file for port ", path, ": ", stderr] in
-      error msg
+  sem buildTaskDppl : RtpplOptions -> String -> Expr -> ()
+  sem buildTaskDppl options path =
+  | taskAst ->
+    let runtimeData = _rts () in
+    let dpplOpts = {default with cps = "partial", extractSimplification = "inline"} in
+    let taskAst = mexprCompile dpplOpts runtimeData taskAst in
+    buildTaskMExpr options path taskAst
 
   sem buildTaskMExpr : RtpplOptions -> String -> Expr -> ()
-  sem buildTaskMExpr options filepath =
-  | ast ->
+  sem buildTaskMExpr options path =
+  | taskAst ->
     -- TODO(larshum, 2023-04-12): This code is essentially duplicated from the
     -- current compilation approach in mi. It should be directly available in a
     -- library.
     let compileOCaml = lam libs. lam clibs. lam prog.
       let opts = {optimize = true, libraries = libs, cLibraries = clibs} in
       let p = ocamlCompileWithConfig opts prog in
-      sysMoveFile p.binaryPath filepath;
-      sysChmodWriteAccessFile filepath;
-      p.cleanup ()
+      sysMoveFile p.binaryPath path;
+      sysChmodWriteAccessFile path;
+      p.cleanup()
     in
-    -- NOTE(larshum, 2023-04-18): If enabled, writes the MExpr AST of the task
-    -- to a file using the filepath with a '.mc' suffix.
-    (if options.debugCompileMExpr then
-      writeFile (concat filepath ".mc") (concat "mexpr\n" (expr2str ast))
-    else ());
-    let ast = typeCheck ast in
-    let ast = lowerAll ast in
-    compileMCore ast (mkEmptyHooks compileOCaml)
+    writeIntermediateMExprIf path taskAst options.debugCompileMExpr;
+    let taskAst = typeCheck taskAst in
+    let taskAst = lowerAll taskAst in
+    compileMCore taskAst (mkEmptyHooks compileOCaml)
 
-  sem buildTaskDppl : RtpplOptions -> String -> Expr -> ()
-  sem buildTaskDppl options filepath =
-  | ast ->
-    let runtimeData = _rts () in
-    let dpplOpts = {default with extractSimplification = "inline"} in
-    let ast = mexprCompile dpplOpts runtimeData ast in
-    buildTaskMExpr options filepath ast
+  -- NOTE(larshum, 2024-11-05): If the provided boolean value is true, we write
+  -- the pretty-printed AST of a task to the provided path.
+  sem writeIntermediateMExprIf : String -> Expr -> Bool -> ()
+  sem writeIntermediateMExprIf path ast =
+  | true -> writeFile (concat path ".mc") (concat "mexpr\n" (expr2str ast))
+  | false -> ()
 
-  sem buildTaskExecutable : RtpplOptions -> Name -> Expr -> ()
-  sem buildTaskExecutable options taskId =
-  | taskAst ->
-    let path = optJoinPath options.outputPath (nameGetStr taskId) in
-    buildTaskDppl options path taskAst
-
-  sem buildRtppl : RtpplOptions -> RtpplProgram -> CompileResult -> ()
-  sem buildRtppl options program =
-  | tasks ->
-    generateJsonSystemSpecification options program;
-    mapFoldWithKey (lam. lam k. lam v. buildTaskExecutable options k v) () tasks
+  -- NOTE(larshum, 2024-11-05): Conditionally print the value produced by the
+  -- provided pretty-print function based on the provided boolean value.
+  sem condPrint : all a. (a -> String) -> a -> Bool -> ()
+  sem condPrint pprint v =
+  | true -> printLn (pprint v)
+  | false -> ()
 end
 
 mexpr
 
-use Rtppl in
+use ProbTimeCompileLang in
 
 let options = parseOptions () in
 let content = readFile options.file in
 let program = parseRtpplExn options.file content in
-(if options.debugParse then
-  printLn (pprintRtpplProgram program)
-else ());
-validateRtpplProgram program;
-let result = compileRtpplProgram options program in
+condPrint pprintRtpplProgram program options.debugParse;
+let program = lowerRtpplProgram program in
+condPrint pprintPTProgram program options.debugLowered;
+validateProbTimeProgram program;
+let result = compileProbTimeProgram options program in
 (if options.debugCompileDppl then
   mapMapWithKey
     (lam id. lam ast.
@@ -200,4 +105,4 @@ let result = compileRtpplProgram options program in
     result;
   ()
 else ());
-buildRtppl options program result
+buildProbTime options program result

@@ -30,10 +30,12 @@ let updateTasks : JsonValue -> [TaskData] -> JsonValue = lam json. lam tasks.
       match mapLookup taskId tasksMap with Some t then
         let mapping = [
           ("id", jsonSerializeString t.id),
-          ("budget", jsonSerializeInt t.budget),
-          ("period", jsonSerializeInt t.period),
-          ("particles", jsonSerializeInt t.particles),
           ("importance", jsonSerializeFloat t.importance),
+          ("minarrival", jsonSerializeInt t.period),
+          ("maxarrival", jsonSerializeInt t.period),
+          ("configurable", jsonSerializeBool t.configurable),
+          ("particles", jsonSerializeInt t.particles),
+          ("budget", jsonSerializeInt t.budget),
           ("core", jsonSerializeInt t.core)
         ] in
         JsonObject (mapFromSeq cmpString mapping)
@@ -53,12 +55,18 @@ let updateTasks : JsonValue -> [TaskData] -> JsonValue = lam json. lam tasks.
 let deserializeTasks : JsonValue -> [TaskData] = lam tasks.
   let deserializeTask = lam t.
     match t with JsonObject kvs then
-      Some { defaultTaskData with
-               id = jsonUnwrap (jsonDeserializeString (jsonLookup "id" kvs)),
-               period = jsonUnwrap (jsonDeserializeInt (jsonLookup "period" kvs)),
-               importance = jsonUnwrap (jsonDeserializeFloat (jsonLookup "importance" kvs)),
-               particles = jsonUnwrap (jsonDeserializeInt (jsonLookup "particles" kvs)),
-               core = jsonUnwrap (jsonDeserializeInt (jsonLookup "core" kvs)) }
+      let id = jsonUnwrap (jsonDeserializeString (jsonLookup "id" kvs)) in
+      let minrate = jsonUnwrap (jsonDeserializeInt (jsonLookup "minarrival" kvs)) in
+      let maxrate = jsonUnwrap (jsonDeserializeInt (jsonLookup "maxarrival" kvs)) in
+      if neqi minrate maxrate then error (join ["Cannot configure aperiodic task ", id])
+      else
+        Some { defaultTaskData with
+                 id = id,
+                 period = minrate,
+                 importance = jsonUnwrap (jsonDeserializeFloat (jsonLookup "importance" kvs)),
+                 configurable = jsonUnwrap (jsonDeserializeBool (jsonLookup "configurable" kvs)),
+                 particles = jsonUnwrap (jsonDeserializeInt (jsonLookup "particles" kvs)),
+                 core = jsonUnwrap (jsonDeserializeInt (jsonLookup "core" kvs)) }
     else jsonFail ()
   in
   jsonUnwrap (jsonDeserializeSeq deserializeTask tasks)
@@ -69,7 +77,7 @@ let deserializeSeq : JsonValue -> [String] = lam sensors.
 let deserializeConnections : JsonValue -> [Connection] = lam connections.
   let deserializePort = lam p.
     let portStr = jsonUnwrap (jsonDeserializeString p) in
-    match strSplit "-" portStr with [fst, portId] ++ _ then
+    match strSplit "." portStr with [fst, portId] then
       { srcId = fst, portId = Some portId }
     else
       { srcId = portStr, portId = None () }
@@ -77,10 +85,7 @@ let deserializeConnections : JsonValue -> [Connection] = lam connections.
   let deserializeConnection = lam c.
     match c with JsonObject kvs then
       { from = deserializePort (jsonLookup "from" kvs)
-      , to = deserializePort (jsonLookup "to" kvs)
-      , messageBaseSize = jsonUnwrap (jsonDeserializeInt (jsonLookup "messageBaseSize" kvs))
-      , messagePerParticleSize = jsonUnwrap (jsonDeserializeInt (jsonLookup "messagePerParticleSize" kvs))
-      , messageFrequency = jsonUnwrap (jsonDeserializeFloat (jsonLookup "messagesPerInstance" kvs)) }
+      , to = deserializePort (jsonLookup "to" kvs) }
     else jsonFail ()
   in
   match connections with JsonArray conns then
