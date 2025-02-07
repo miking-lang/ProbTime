@@ -1,19 +1,27 @@
 # ProbTime
 
-ProbTime is a real-time probabilistic programming language (RTPPL). Using ProbTime, you can easily define probabilistic models that reason about timing aspects.
+ProbTime is a real-time probabilistic programming language (RTPPL). Using ProbTime, you can easily define probabilistic models that reason about timing aspects. ProbTime is supported on Linux only.
 
 ## Installing
 
-Before installing the ProbTime compiler, `rtppl` (Real-Time Probabilistic Programming Language), you need to install [Miking](https://github.com/miking-lang/miking/) and [Miking DPPL](https://github.com/miking-lang/miking-dppl). In addition, you need to configure the `MCORE_LIBS` variable such that it includes the paths to the Miking and Miking DPPL standard libraries:
+The ProbTime compiler `rtppl` (for Real-Time Probabilistic Programming Language) depends on Miking and Miking DPPL, both of which are included as submodules (`miking` and `miking-dppl` respectively). These refer to commits of those repositories for which ProbTime has been verified to work correctly. Run
 ```
-MCORE_LIBS="stdlib=/path/to/Miking/stdlib:coreppl=/path/to/coreppl/stdlib"
+git submodule init
+git submodule update
 ```
-
-Following the above installations, you can install the ProbTime compiler by running `make install` at the root of this repository. This installs the ProbTime compiler `rtppl` and the configuration binary `rtppl-configure` (ensure that `$(HOME)/.local/bin` is in your path). Run `make uninstall` to undo the installation.
+to initialize the submodules, and then follow the installation instructions in the respctive repository to install Miking and Miking DPPL. After installing them, you need to configure the `MCORE_LIBS` variable such that it includes paths to the Miking and Miking DPPL standard libraries. For instance, this could look like
+```
+export MCORE_LIBS="stdlib=/path/to/Miking/stdlib:coreppl=/path/to/coreppl/stdlib"
+```
+After setting the `MCORE_LIBS` variable, you can install the ProbTime compiler by running
+```
+make install
+```
+This installs the ProbTime compiler `rtppl` and the automated configuration binary `rtppl-configure` in `$(HOME)/.local/bin` (ensure this is included in your path). Run `make uninstall` to undo the installation.
 
 ## Overview
 
-A ProbTime program defines a system of tasks which can interact with each other. The ProbTime compiler produces an executable for each task defined in the ProbTime program. Tasks communicate with each other via ports using messages (timestamped values). When a task writes data to an output port, it is sent to all connected input ports (≥ 1). When a task reads from an input port, which may only receive data from one output port, it receives a sequence of newly arrived messages. Tasks can also communicate with external code using sensors (treated as an output port) and actuators (treated as an input port). A sensor provides input from an external source to one or more ProbTime tasks. An actuator propagates output from a ProbTime task to an external destination.
+A ProbTime program defines a system of tasks which can interact with each other. The ProbTime compiler produces an executable for each task defined in the ProbTime program. Tasks communicate with each other via ports using messages (timestamped values). When a task writes data to an output port, it is sent to all connected input ports (≥ 1) at the end of the task instance. When a task reads from an input port, which may only receive data from one output port, it retrieves a sequence of messages. Tasks can also communicate with external code using sensors (treated as an output port) and actuators (treated as an input port). A sensor provides input from an external source to one or more ProbTime tasks. An actuator propagates output from a ProbTime task to an external destination.
 
 ### Program structure
 
@@ -28,25 +36,23 @@ For concrete examples of ProbTime programs, we refer to the `examples` directory
 
 ### Configuration
 
-Prior to running the configuration, we need to compile the ProbTime program by passing it to the `rtppl` command. Next, we need to specify a task-to-core mapping for each task. We do this by listing the tasks and the core index they are mapped to (we assume tasks run exclusively on a single core) in a file `task-core-map.txt`. The concrete examples show how to do this.
+Before running configuration, we need to compile the ProbTime program by passing its name to the `rtppl` command. The compilation produces a binary for each task defined in the ProbTime program and a system specification JSON file `system.json`. Before running the configuration, we need to specify the task-to-core mapping by setting the `core` property of each task to the desired index (by default, they are all mapped to core #0). Here, we can also specify the relative importance of each task via the `importance`, which impacts how resources (execution time or particle count) are distributed among the tasks. The importance should be set to `0.0` for tasks that contain no configurable inference.
 
-Each task may perform inference using probabilistic models. However, you don't have to specify how to perform inference. We perform Sequential Monte Carlo (SMC) under the hood. We provide the `rtppl-configure` binary to determine how many particles to use in each inference. It takes a runner command, with which to run all tasks (providing pre-recorded data), and repeatedly runs the tasks to find a fair allocation of execution times or number of particles (if `--particle-fairness` is specified), based on how important tasks are and based on the worst-case execution times (WCETs) it finds.
+Each task may perform probabilistic inference, either by specifying a fixed number of particles to run or by omitting it. The configuration automatically finds the maximum number of particles to use in the latter case for all tasks, in a fair way. We provide the `rtppl-configure` binary to determine how many particles to use in each use of `infer` (the keyword associated with probabilistic inference). It takes a runner command, using which it can run all tasks of the ProbTime system (providing pre-recorded data), and repeatedly runs the tasks to find a fair allocation of execution times or particle counts (depending on whether `--execution-time-fairness` or `--particle-fairness` is used), based on the importance of each task and on the measured worst-case execution times (WCETs).
 
-After the configuration, each task `t` will have a configuration file `t.config` specifying the number of particles to use, the maximum CPU execution time to use (used to detect and report overruns), and the slowdown factor (used for simulation purposes). You can manually create the configuration files to avoid having to run the configuration.
+While the automatic configuration is running, it will print the particle count assigned to each task and the measured WCETs. After the configuration has finished, it will update the `system.json` file by setting the `particles` property (determining the particle count of configurable infers) based on its findings. Users can employ custom tools for determining the particle count or manually fill in the desired values to avoid having to run the configuration.
 
 ### Limitations
 
-Currently, we assume each task consists of an initialization (any number of finite statements) followed by an infinite loop (`while true { ... }`). Due to how our configuration works, we further assume that:
-1. The infinite loop contains exactly one use of `delay` with a fixed argument (i.e., we assume tasks are periodic).
-2. The infinite loop contains at most one use of `infer`. This inference is the one for which we control the number of particles. All uses of `infer` in the initialization use a fixed number of particles (currently, 100).
-
-ProbTime currently only works on Linux. We assume tasks run exclusively on a single core (e.g., by using `taskset`), which is currently not supported on MacOS.
+Currently, our automatic configuration assumes all tasks in the system are periodic. If any task is sporadic, you have two options:
+1. Manually set the particle count of all `infer`s in the system.
+2. Perform your own automatic configuration, by setting the particle count in the `system.json` file.
 
 ## External behavior
 
 In this part, we provide necessary information for defining an underlying platform for relaying messages between ProbTime tasks as well as external code interacting with ProbTime tasks via sensors and actuators.
 
-All connections between tasks are listed in the `connections` list of the `network.json` file containing a JSON encoding of the system specification. For each input port of a task, the compiler creates a shared memory object (`shm_open`) with memory mapping (`mmap`) using a buffer size of `2^22` (hard-coded for now). Assume we have a task `A` with an input port `in`. If the connected output port belongs to another task, then it will write directly to a shared memory object called `A-in`. Otherwise, if the output port is a sensor, the underlying platform is responsible for writing to it using a correct format.
+All connections between tasks are listed in the `connections` list of the `system.json` file containing a JSON encoding of the system specification. For each input port of a task, the compiler creates a shared memory object (`shm_open`) with memory mapping (`mmap`) using a buffer size of `2^22` (hard-coded for now). Assume we have a task `A` with an input port `in`. If the connected output port belongs to another task, then it will write directly to a shared memory object called `A-in`. Otherwise, if the output port is a sensor, the underlying platform is responsible for writing to it using a correct format.
 
 The binary format of each message starts with a 64-bit size (for the timestamp and the payload). We use this as distributions may vary in size. Next, we encode the 64-bit timestamp (an absolute value). Finally, the remaining part of the message consists of the payload (of length `size - 8` bytes). Currently, the compiler only has support for a few specific kinds of data. For a comprehensive example using this in practice via a Python implementation, see [this repo](https://github.com/larshum/rtppl-experiments).
 
